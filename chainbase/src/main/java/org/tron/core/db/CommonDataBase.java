@@ -29,6 +29,10 @@ public class CommonDataBase extends TronDatabase<byte[]> {
   private static final byte[] CURRENT_EPOCH = "CURRENT_EPOCH".getBytes();
   private static final byte[] CHAIN_MAINTENANCE_KEY = "MAINTENANCE".getBytes();
   private static final byte[] HEADER_HASH_KEY = "HEADER_HASH".getBytes();
+  private static final byte[] CHAIN_MAINTENANCE_TIME_INTERVAL =
+          "CHAIN_MAINTENANCE_TIME_INTERVAL".getBytes();
+  private static final byte[] CHAIN_PROXY_ADDRESS = "CHAIN_PROXY_ADDRESS".getBytes();
+  private static final byte[] CHAIN_AGREE_NODE_COUNT = "CHAIN_AGREE_NODE_COUNT".getBytes();
 
   public CommonDataBase() {
     super("common-database");
@@ -93,8 +97,8 @@ public class CommonDataBase extends TronDatabase<byte[]> {
         .orElse(0L);
   }
 
-  public void saveLatestHeaderBlockNum(String chainId, long number) {
-    if (number <= getLatestHeaderBlockNum(chainId)) {
+  public void saveLatestHeaderBlockNum(String chainId, long number, boolean forceUpdate) {
+    if (!forceUpdate && number <= getLatestHeaderBlockNum(chainId)) {
       logger.warn("chainId: {}, sync number {} <= latest number {}",
           chainId, number, getLatestHeaderBlockNum(chainId));
       return;
@@ -235,7 +239,7 @@ public class CommonDataBase extends TronDatabase<byte[]> {
   }
 
   public void updateCrossNextMaintenanceTime(String chainId, long blockTime) {
-    long maintenanceTimeInterval = CommonParameter.getInstance().getMaintenanceTimeInterval();//todo
+    long maintenanceTimeInterval = getChainMaintenanceTimeInterval(chainId);
 
     long currentMaintenanceTime = getCrossNextMaintenanceTime(chainId);
     long round = (blockTime - currentMaintenanceTime) / maintenanceTimeInterval;
@@ -247,6 +251,37 @@ public class CommonDataBase extends TronDatabase<byte[]> {
         chainId, new DateTime(currentMaintenanceTime), new DateTime(blockTime),
         new DateTime(nextMaintenanceTime)
     );
+  }
+
+  public long getChainMaintenanceTimeInterval(String chainId) {
+    return Optional.ofNullable(get(buildKey(CHAIN_MAINTENANCE_TIME_INTERVAL, chainId)))
+            .map(ByteArray::toLong)
+            .orElse(300000L);
+  }
+
+  public void saveChainMaintenanceTimeInterval(String chainId, long chainMaintenanceTimeInterval) {
+    this.put(buildKey(CHAIN_MAINTENANCE_TIME_INTERVAL, chainId),
+            ByteArray.fromLong(chainMaintenanceTimeInterval));
+  }
+
+  public void saveProxyAddress(String chainId, String proxyAddress) {
+    this.put(buildKey(CHAIN_PROXY_ADDRESS, chainId), proxyAddress.getBytes());
+  }
+
+  public String getProxyAddress(String chainId) {
+    return Optional.ofNullable(get(buildKey(CHAIN_PROXY_ADDRESS, chainId)))
+            .map(String::new)
+            .orElse(null);
+  }
+
+  public void saveAgreeNodeCount(String chainId, int count) {
+    this.put(buildKey(CHAIN_AGREE_NODE_COUNT, chainId), ByteArray.fromInt(count));
+  }
+
+  public int getAgreeNodeCount(String chainId) {
+    return Optional.ofNullable(get(buildKey(CHAIN_AGREE_NODE_COUNT, chainId)))
+            .map(ByteArray::toInt)
+            .orElse(0);
   }
 
 }

@@ -74,6 +74,7 @@ import org.tron.api.GrpcAPI.SpendAuthSigParameters;
 import org.tron.api.GrpcAPI.SpendResult;
 import org.tron.api.GrpcAPI.TransactionApprovedList;
 import org.tron.api.GrpcAPI.TransactionExtention;
+import org.tron.api.GrpcAPI.TransactionIdList;
 import org.tron.api.GrpcAPI.TransactionInfoList;
 import org.tron.api.GrpcAPI.TransactionList;
 import org.tron.api.GrpcAPI.TransactionListExtention;
@@ -1281,8 +1282,13 @@ public class RpcApiService implements Service {
 
       int votesCount = req.getVotesCount();
       Preconditions.checkArgument(votesCount <= 0, "VotesCount[" + votesCount + "] <= 0");
-      Preconditions.checkArgument(account.getTronPower() < votesCount,
-          "tron power[" + account.getTronPower() + "] <  VotesCount[" + votesCount + "]");
+      if (dbManager.getDynamicPropertiesStore().supportAllowNewResourceModel()) {
+        Preconditions.checkArgument(account.getAllTronPower() < votesCount,
+            "tron power[" + account.getAllTronPower() + "] <  VotesCount[" + votesCount + "]");
+      } else {
+        Preconditions.checkArgument(account.getTronPower() < votesCount,
+            "tron power[" + account.getTronPower() + "] <  VotesCount[" + votesCount + "]");
+      }
 
       req.getVotesList().forEach(vote -> {
         ByteString voteAddress = vote.getVoteAddress();
@@ -2648,7 +2654,8 @@ public class RpcApiService implements Service {
     @Override
     public void registerCrossChain(BalanceContract.CrossChainInfo request,
                               StreamObserver<TransactionExtention> responseObserver) {
-      createTransactionExtention(request, ContractType.RegisterCrossChainContract, responseObserver);
+      createTransactionExtention(request, ContractType.RegisterCrossChainContract,
+          responseObserver);
     }
 
     @Override
@@ -2659,10 +2666,22 @@ public class RpcApiService implements Service {
 
     @Override
     public void getRegisterCrossChainList(PaginatedMessage request,
-                                     StreamObserver<GrpcAPI.RegisterCrossChainList> responseObserver) {
+                                     StreamObserver<GrpcAPI.RegisterCrossChainList>
+                                         responseObserver) {
       GrpcAPI.RegisterCrossChainList registerCrossList =
               wallet.getRegisterCrossList(request.getOffset(), request.getLimit());
       responseObserver.onNext(registerCrossList);
+      responseObserver.onCompleted();
+    }
+
+    @Override
+    public void getRegisterCrossChainInfo(GrpcAPI.RegisterNumMessage request,
+                                          StreamObserver<BalanceContract.CrossChainInfo>
+                                                  responseObserver) {
+      BalanceContract.CrossChainInfo crossChainInfo =
+              wallet.getRegisterCrossChainInfo(request.getRegisterNum());
+      responseObserver.onNext(crossChainInfo);
+      responseObserver.onCompleted();
     }
 
     @Override
@@ -2679,18 +2698,59 @@ public class RpcApiService implements Service {
 
     @Override
     public void getCrossChainVoteSummaryList(GrpcAPI.CrossChainVoteSummaryPaginated request,
-                                             StreamObserver<GrpcAPI.CrossChainVoteSummaryList> responseObserver) {
+                                             StreamObserver<GrpcAPI.CrossChainVoteSummaryList>
+                                                 responseObserver) {
       GrpcAPI.CrossChainVoteSummaryList crossTotalVoteList =
-              wallet.getCrossChainTotalVoteList(request.getOffset(), request.getLimit(),request.getRound());
+              wallet.getCrossChainTotalVoteList(request.getOffset(), request.getLimit(),
+                  request.getRound());
       responseObserver.onNext(crossTotalVoteList);
+      responseObserver.onCompleted();
     }
 
     @Override
     public void getCrossChainVoteDetailList(GrpcAPI.CrossChainVotePaginated request,
-                                       StreamObserver<GrpcAPI.CrossChainVoteDetailList> responseObserver) {
-      GrpcAPI.CrossChainVoteDetailList voteCrossList = wallet.getCrossChainVoteDetailList(request.getOffset(),
-              request.getLimit(), request.getChainId().toString(), request.getRound());
+                                       StreamObserver<GrpcAPI.CrossChainVoteDetailList>
+                                           responseObserver) {
+      GrpcAPI.CrossChainVoteDetailList voteCrossList = wallet.getCrossChainVoteDetailList(
+          request.getOffset(), request.getLimit(), request.getRegisterNum(), request.getRound());
       responseObserver.onNext(voteCrossList);
+      responseObserver.onCompleted();
+    }
+
+    @Override
+    public void getParaChainList(GrpcAPI.RoundMessage request,
+                                 StreamObserver<GrpcAPI.ParaChainList> responseObserver) {
+      GrpcAPI.ParaChainList paraChainList = wallet.getParaChainList(request.getRound());
+      responseObserver.onNext(paraChainList);
+      responseObserver.onCompleted();
+    }
+
+    @Override
+    public void getCrossChainAuctionConfigDetailList(GrpcAPI.EmptyMessage request,
+                                                     StreamObserver<org.tron.api.GrpcAPI
+                                                         .CrossChainAuctionConfigDetailList>
+                                                         responseObserver) {
+      GrpcAPI.CrossChainAuctionConfigDetailList auctinConfigDetailList = wallet
+          .getCrossChainAuctionConfigDetailList();
+      responseObserver.onNext(auctinConfigDetailList);
+      responseObserver.onCompleted();
+    }
+
+    public void getTransactionFromPending(BytesMessage request,
+        StreamObserver<Transaction> responseObserver) {
+      getTransactionFromPendingCommon(request, responseObserver);
+    }
+
+    @Override
+    public void getTransactionListFromPending(EmptyMessage request,
+        StreamObserver<TransactionIdList> responseObserver) {
+      getTransactionListFromPendingCommon(request, responseObserver);
+    }
+
+    @Override
+    public void getPendingSize(EmptyMessage request,
+        StreamObserver<NumberMessage> responseObserver) {
+      getPendingSizeCommon(request, responseObserver);
     }
   }
 
@@ -2773,13 +2833,49 @@ public class RpcApiService implements Service {
     responseObserver.onNext(builder.build());
     responseObserver.onCompleted();
   }
-
+  
   private void checkCrossTransactionCommitCommon(BytesMessage request,
       StreamObserver<Return> responseObserver) {
     try {
       boolean value = crossChainService.checkCrossChainCommit(request.getValue());
       Return.Builder builder = Return.newBuilder();
       builder.setResult(value);
+      responseObserver.onNext(builder.build());
+    } catch (Exception e) {
+      responseObserver.onError(e);
+    }
+    responseObserver.onCompleted();
+  }
+      
+  public void getTransactionFromPendingCommon(BytesMessage request,
+      StreamObserver<Transaction> responseObserver) {
+    try {
+      String txId = ByteArray.toHexString(request.getValue().toByteArray());
+      TransactionCapsule transactionCapsule = dbManager.getTxFromPending(txId);
+      responseObserver.onNext(transactionCapsule == null ? null : transactionCapsule.getInstance());
+    } catch (Exception e) {
+      responseObserver.onError(e);
+    }
+    responseObserver.onCompleted();
+  }
+
+  public void getTransactionListFromPendingCommon(EmptyMessage request,
+      StreamObserver<TransactionIdList> responseObserver) {
+    try {
+      TransactionIdList.Builder builder = TransactionIdList.newBuilder();
+      builder.addAllTxId(dbManager.getTxListFromPending());
+      responseObserver.onNext(builder.build());
+    } catch (Exception e) {
+      responseObserver.onError(e);
+    }
+    responseObserver.onCompleted();
+  }
+
+  public void getPendingSizeCommon(EmptyMessage request,
+      StreamObserver<NumberMessage> responseObserver) {
+    try {
+      NumberMessage.Builder builder = NumberMessage.newBuilder();
+      builder.setNum(dbManager.getPendingSize());
       responseObserver.onNext(builder.build());
     } catch (Exception e) {
       responseObserver.onError(e);

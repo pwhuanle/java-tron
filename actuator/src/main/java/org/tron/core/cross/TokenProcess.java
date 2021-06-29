@@ -75,7 +75,7 @@ public class TokenProcess {
       AccountCapsule accountCapsule = accountStore.get(toAddress);
       accountCapsule.addAssetAmountV2(ByteArray.fromString(tokenId),
           amount, dynamicStore, assetIssueStore);
-      accountStore.put(ownerAddress, accountCapsule);
+      accountStore.put(toAddress, accountCapsule);
       assetIssueV2Store.put(ByteArray.fromString(tokenId), assetIssueCapsule);
     } else {
       String destTokenId = crossRevokingStore
@@ -87,8 +87,8 @@ public class TokenProcess {
         AccountCapsule accountCapsule = accountStore.get(toAddress);
         accountCapsule.addAssetAmountV2(ByteArray.fromString(destTokenId),
             amount, dynamicStore, assetIssueStore);
-        accountStore.put(ownerAddress, accountCapsule);
-        assetIssueV2Store.put(ByteArray.fromString(tokenId), assetIssueCapsule);
+        accountStore.put(toAddress, accountCapsule);
+        assetIssueV2Store.put(ByteArray.fromString(destTokenId), assetIssueCapsule);
       } else {
         //create the asset
         long descTokenId = createAsset(chainBaseManager, crossToken, crossContract);
@@ -181,6 +181,13 @@ public class TokenProcess {
     }
     if (amount > assetBalance) {
       throw new ContractValidateException("assetBalance is not sufficient.");
+    }
+    AssetIssueCapsule assetIssueCapsule = assetIssueV2Store.get(assetId);
+    if (!assetIssueCapsule.getName().equals(crossToken.getTokenName())) {
+      throw new ContractValidateException("token name is not matched");
+    }
+    if (assetIssueCapsule.getPrecision() != crossToken.getPrecision()) {
+      throw new ContractValidateException("token precision is not matched");
     }
   }
 

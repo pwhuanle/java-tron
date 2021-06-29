@@ -38,17 +38,19 @@ public class LocalHeaderMsgProcess {
     byte[] chainId = requestMessage.getChainId().toByteArray();
     String chainIdString = ByteArray.toHexString(chainId);
     long blockHeight = requestMessage.getBlockHeight();
-    long currentBlockheight = chainBaseManager.getCommonDataBase()
+    long latestMaintenanceTime = requestMessage.getLatestMaintenanceTime();
+    long currentBlockHeight = chainBaseManager.getCommonDataBase()
         .getLatestHeaderBlockNum(chainIdString);
     if (!chainBaseManager.chainIsSelected(requestMessage.getChainId())) {
       return;
     }
     logger.info("handleRequest, peer:{}, chainId:{}, request num:{}, current:{}, ",
-        peer, chainIdString, blockHeight, currentBlockheight);
+        peer, chainIdString, blockHeight, currentBlockHeight);
     List<SignedBlockHeader> blockHeaders = new ArrayList<>();
-    if (currentBlockheight > blockHeight) {
+    if (currentBlockHeight > blockHeight) {
       long height = blockHeight + 1;
-      for (int i = 1; i <= SYNC_NUMBER && height < currentBlockheight; i++) {
+      boolean isMaintenanceTimeUpdated = false;
+      for (int i = 1; i <= SYNC_NUMBER && height < currentBlockHeight; i++) {
         height = blockHeight + i;
         BlockId blockId = chainBaseManager.getBlockHeaderIndexStore()
             .getUnchecked(chainIdString, height);
@@ -62,33 +64,40 @@ public class LocalHeaderMsgProcess {
           builder.addAllSrsSignature(pbftSignCapsule.getInstance().getSignatureList());
         }
         //
-        setSrList(builder, chainIdString, blockHeaderCapsule.getTimeStamp());
+        isMaintenanceTimeUpdated = setSrList(builder, chainIdString,
+                blockHeaderCapsule.getTimeStamp(),
+                latestMaintenanceTime, isMaintenanceTimeUpdated);
         blockHeaders.add(builder.build());
       }
     } else {
       //todo
     }
     BlockHeaderInventoryMesasge inventoryMesasge =
-        new BlockHeaderInventoryMesasge(chainIdString, currentBlockheight, blockHeaders);
+        new BlockHeaderInventoryMesasge(chainIdString, currentBlockHeight, blockHeaders);
     peer.sendMessage(inventoryMesasge);
   }
 
-  protected void setSrList(Builder builder, String chainIdString, long blockTime) {
-    //
-    long round = blockTime / CommonParameter.getInstance().getMaintenanceTimeInterval();
-    long maintenanceTime = (round + 1) * CommonParameter.getInstance().getMaintenanceTimeInterval();
-    Long latestMaintenanceTime = latestMaintenanceTimeMap.get(chainIdString);
-    latestMaintenanceTime = latestMaintenanceTime == null ? 0 : latestMaintenanceTime;
+  protected boolean setSrList(Builder builder, String chainIdString, long blockTime,
+                           long latestMaintenanceTime, boolean isMaintenanceTimeUpdated) {
+    long maintenanceTimeInterval = chainBaseManager.getCommonDataBase()
+            .getChainMaintenanceTimeInterval(chainIdString);
+    long round = blockTime / maintenanceTimeInterval;
+    long maintenanceTime = (round + 1) * maintenanceTimeInterval;
+    // Long latestMaintenanceTimeTmp = latestMaintenanceTimeMap.get(chainIdString);
+    // latestMaintenanceTimeTmp = latestMaintenanceTimeTmp == null ? 0 : latestMaintenanceTimeTmp;
     logger.debug("set sr list, maintenanceTime:{}, latestMaintenanceTime:{}", maintenanceTime,
         latestMaintenanceTime);
-    if (maintenanceTime > latestMaintenanceTime) {
+    if ((maintenanceTime > latestMaintenanceTime && !isMaintenanceTimeUpdated)
+            || (blockTime % maintenanceTimeInterval == 0)) {
       PBFTCommitResult pbftCommitResult = chainBaseManager.getCommonDataBase()
           .getSRLCommit(chainIdString, maintenanceTime);
       if (pbftCommitResult != null) {
-        latestMaintenanceTimeMap.put(chainIdString, maintenanceTime);
+        // latestMaintenanceTimeMap.put(chainIdString, maintenanceTime);
         builder.setSrList(pbftCommitResult);
+        return true;
       }
     }
+    return isMaintenanceTimeUpdated;
   }
 
 }

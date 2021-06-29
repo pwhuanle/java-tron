@@ -3,12 +3,15 @@ package org.tron.core.config.args;
 import static java.lang.Math.max;
 import static java.lang.System.exit;
 import static org.tron.core.Constant.ADD_PRE_FIX_BYTE_MAINNET;
+import static org.tron.core.Constant.CROSS_CHAIN_WHITE_LIST;
+import static org.tron.core.Constant.CROSS_CHAIN_WHITE_LIST_REFRESH;
 import static org.tron.core.Constant.NODE_CROSS_CHAIN_CONNECT;
 import static org.tron.core.Constant.NODE_CROSS_CHAIN_PORT;
 import static org.tron.core.config.Parameter.ChainConstant.BLOCK_PRODUCE_TIMEOUT_PERCENT;
 import static org.tron.core.config.Parameter.ChainConstant.MAX_ACTIVE_WITNESS_NUM;
 
 import com.beust.jcommander.JCommander;
+import com.google.protobuf.ByteString;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigObject;
 import io.grpc.internal.GrpcUtil;
@@ -67,6 +70,8 @@ import org.tron.core.store.AccountStore;
 import org.tron.keystore.Credentials;
 import org.tron.keystore.WalletUtils;
 import org.tron.program.Version;
+import org.tron.protos.contract.BalanceContract;
+import org.tron.protos.contract.BalanceContract.CrossChainInfo;
 
 @Slf4j(topic = "app")
 @NoArgsConstructor
@@ -177,12 +182,14 @@ public class Args extends CommonParameter {
     PARAMETER.solidityNodeHttpEnable = true;
     PARAMETER.nodeMetricsEnable = false;
     PARAMETER.metricsStorageEnable = false;
+    PARAMETER.maxActiveWitnessNum = MAX_ACTIVE_WITNESS_NUM;
     PARAMETER.agreeNodeCount = MAX_ACTIVE_WITNESS_NUM * 2 / 3 + 1;
     PARAMETER.allowPBFT = 0;
     PARAMETER.allowShieldedTRC20Transaction = 0;
     PARAMETER.allowMarketTransaction = 0;
     PARAMETER.allowTransactionFeePool = 0;
     PARAMETER.allowBlackHoleOptimization = 0;
+    PARAMETER.allowNewResourceModel = 0;
     PARAMETER.allowTvmIstanbul = 0;
     PARAMETER.allowTvmStake = 0;
     PARAMETER.allowTvmAssetIssue = 0;
@@ -191,6 +198,10 @@ public class Args extends CommonParameter {
     PARAMETER.crossChainConnect = Collections.emptyList();
     PARAMETER.crossChain = 0;
     PARAMETER.shouldRegister = true;
+    PARAMETER.crossChainWhiteListRefresh = false;
+    PARAMETER.crossChainWhiteList = Collections.emptyList();
+    PARAMETER.openPrintLog = true;
+    PARAMETER.openTransactionSort = false;
   }
 
   /**
@@ -643,6 +654,10 @@ public class Args extends CommonParameter {
         config.hasPath(Constant.COMMITTEE_ALLOW_BLACK_HOLE_OPTIMIZATION) ? config
             .getInt(Constant.COMMITTEE_ALLOW_BLACK_HOLE_OPTIMIZATION) : 0;
 
+    PARAMETER.allowNewResourceModel =
+        config.hasPath(Constant.COMMITTEE_ALLOW_NEW_RESOURCE_MODEL) ? config
+            .getInt(Constant.COMMITTEE_ALLOW_NEW_RESOURCE_MODEL) : 0;
+
     PARAMETER.allowTvmIstanbul =
         config.hasPath(Constant.COMMITTEE_ALLOW_TVM_ISTANBUL) ? config
             .getInt(Constant.COMMITTEE_ALLOW_TVM_ISTANBUL) : 0;
@@ -701,10 +716,13 @@ public class Args extends CommonParameter {
         config.hasPath(Constant.COMMITTEE_ALLOW_PBFT) ? config
             .getLong(Constant.COMMITTEE_ALLOW_PBFT) : 0;
 
+    PARAMETER.maxActiveWitnessNum = config.hasPath(Constant.MAX_ACTIVE_WITNESS_NUM) ? config
+            .getInt(Constant.MAX_ACTIVE_WITNESS_NUM) : MAX_ACTIVE_WITNESS_NUM;
+
     PARAMETER.agreeNodeCount = config.hasPath(Constant.NODE_AGREE_NODE_COUNT) ? config
-        .getInt(Constant.NODE_AGREE_NODE_COUNT) : MAX_ACTIVE_WITNESS_NUM * 2 / 3 + 1;
-    PARAMETER.agreeNodeCount = PARAMETER.agreeNodeCount > MAX_ACTIVE_WITNESS_NUM
-        ? MAX_ACTIVE_WITNESS_NUM : PARAMETER.agreeNodeCount;
+        .getInt(Constant.NODE_AGREE_NODE_COUNT) : PARAMETER.maxActiveWitnessNum * 2 / 3 + 1;
+    PARAMETER.agreeNodeCount = PARAMETER.agreeNodeCount > PARAMETER.maxActiveWitnessNum
+        ? PARAMETER.maxActiveWitnessNum : PARAMETER.agreeNodeCount;
     if (PARAMETER.isWitness()) {
       //  INSTANCE.agreeNodeCount = MAX_ACTIVE_WITNESS_NUM * 2 / 3 + 1;
     }
@@ -719,6 +737,11 @@ public class Args extends CommonParameter {
     PARAMETER.allowTvmAssetIssue =
             config.hasPath(Constant.COMMITTEE_ALLOW_TVM_ASSETISSUE) ? config
                     .getInt(Constant.COMMITTEE_ALLOW_TVM_ASSETISSUE) : 0;
+
+    PARAMETER.allowTvmFreeze =
+            config.hasPath(Constant.COMMITTEE_ALLOW_TVM_FREEZE) ? config
+                    .getInt(Constant.COMMITTEE_ALLOW_TVM_FREEZE) : 0;
+
     initBackupProperty(config);
     if (Constant.ROCKSDB.equals(CommonParameter
             .getInstance().getStorage().getDbEngine().toUpperCase())) {
@@ -746,8 +769,8 @@ public class Args extends CommonParameter {
     PARAMETER.metricsReportInterval = config.hasPath(Constant.METRICS_REPORT_INTERVAL) ? config
             .getInt(Constant.METRICS_REPORT_INTERVAL) : 10;
 
-    PARAMETER.shouldRegister = config.hasPath(Constant.NODE_CROSS_CHAIN_SHOULD_REGISTER) ? config
-        .getBoolean(Constant.NODE_CROSS_CHAIN_SHOULD_REGISTER) : true;
+    PARAMETER.shouldRegister = !config.hasPath(Constant.NODE_CROSS_CHAIN_SHOULD_REGISTER) || config
+            .getBoolean(Constant.NODE_CROSS_CHAIN_SHOULD_REGISTER);
 
     // lite fullnode params
     PARAMETER.setLiteFullNode(checkIsLiteFullNode());
@@ -757,6 +780,15 @@ public class Args extends CommonParameter {
 
     PARAMETER.historyBalanceLookup = config.hasPath(Constant.HISTORY_BALANCE_LOOKUP) && config
         .getBoolean(Constant.HISTORY_BALANCE_LOOKUP);
+
+    PARAMETER.crossChainWhiteListRefresh = config.hasPath(Constant.CROSS_CHAIN_WHITE_LIST_REFRESH)
+            && config.getBoolean(CROSS_CHAIN_WHITE_LIST_REFRESH);
+    PARAMETER.crossChainWhiteList = getCrossChainWhiteList(config);
+    
+    PARAMETER.openPrintLog = config.hasPath(Constant.OPEN_PRINT_LOG) && config
+        .getBoolean(Constant.OPEN_PRINT_LOG);
+    PARAMETER.openTransactionSort = config.hasPath(Constant.OPEN_TRANSACTION_SORT) && config
+        .getBoolean(Constant.OPEN_TRANSACTION_SORT);
 
     logConfig();
   }
@@ -1149,6 +1181,38 @@ public class Args extends CommonParameter {
         logger.warn(IGNORE_WRONG_WITNESS_ADDRESS_FORMAT);
       }
     }
+  }
+
+  private static List<CrossChainInfo> getCrossChainWhiteList(Config config) {
+    if (config.hasPath(Constant.CROSS_CHAIN_WHITE_LIST)) {
+      return config.getObjectList(Constant.CROSS_CHAIN_WHITE_LIST).stream()
+              .map(Args::createCrossChainInfo)
+              .collect(Collectors.toCollection(ArrayList::new));
+    } else {
+      return new ArrayList<>();
+    }
+  }
+
+  private static CrossChainInfo createCrossChainInfo(final ConfigObject configObject) {
+    String srListStr = "srList";
+    final CrossChainInfo.Builder crossChainInfo = CrossChainInfo.newBuilder();
+    crossChainInfo.setOwnerAddress(ByteString.copyFrom(
+            ByteArray.fromHexString(configObject.get("ownerAddress").unwrapped().toString())));
+    crossChainInfo.setProxyAddress(ByteString.copyFrom(
+            ByteArray.fromHexString(configObject.get("proxyAddress").unwrapped().toString())));
+    crossChainInfo.setChainId(ByteString.copyFrom(
+            ByteArray.fromHexString(configObject.get("chainId").unwrapped().toString())));
+    List<String> srList = configObject.get(srListStr).atKey(srListStr).getStringList(srListStr);
+    for (String sr : srList) {
+      crossChainInfo.addSrList(ByteString.copyFrom(ByteArray.fromHexString(sr)));
+    }
+    crossChainInfo.setBeginSyncHeight(configObject.toConfig().getLong("beginSyncHeight"));
+    crossChainInfo.setMaintenanceTimeInterval(
+            configObject.toConfig().getLong("maintenanceTimeInterval"));
+    crossChainInfo.setParentBlockHash(ByteString.copyFrom(
+            ByteArray.fromHexString(configObject.get("parentBlockHash").unwrapped().toString())));
+    crossChainInfo.setBlockTime(configObject.toConfig().getLong("blockTime"));
+    return crossChainInfo.build();
   }
 }
 

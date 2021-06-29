@@ -2,6 +2,8 @@ package org.tron.core.actuator;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
+
+import java.util.List;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 import org.tron.common.utils.ByteArray;
@@ -40,11 +42,11 @@ public class CrossChainRegisterActuator extends AbstractActuator {
     try {
       CrossChainInfo crossChainInfo = any.unpack(CrossChainInfo.class);
       byte[] ownerAddress = crossChainInfo.getOwnerAddress().toByteArray();
-      String chainId = crossChainInfo.getChainId().toString();
-      long burn = dynamicStore.getBurnedForRegisterCross();
-      Commons.adjustBalance(accountStore, ownerAddress, -burn);
-      Commons.adjustBalance(accountStore, accountStore.getBlackhole().createDbKey(), burn);
-      crossRevokingStore.putChainInfo(chainId, crossChainInfo.toByteArray());
+      long registerNum = crossChainInfo.getRegisterNum();
+      fee = fee + dynamicStore.getBurnedForRegisterCross();
+      Commons.adjustBalance(accountStore, ownerAddress, -fee);
+      Commons.adjustBalance(accountStore, accountStore.getBlackhole().createDbKey(), fee);
+      crossRevokingStore.putChainInfo(registerNum, crossChainInfo.toByteArray());
       ret.setStatus(fee, code.SUCESS);
     } catch (BalanceInsufficientException | ArithmeticException | InvalidProtocolBufferException e) {
       logger.debug(e.getMessage(), e);
@@ -62,28 +64,43 @@ public class CrossChainRegisterActuator extends AbstractActuator {
     if (chainBaseManager == null) {
       throw new ContractValidateException(ActuatorConstant.STORE_NOT_EXIST);
     }
-    CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
+
     DynamicPropertiesStore dynamicStore = chainBaseManager.getDynamicPropertiesStore();
+    if (!dynamicStore.allowCrossChain()) {
+      throw new ContractValidateException("not support cross chain!");
+    }
+
+    CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
     AccountStore accountStore = chainBaseManager.getAccountStore();
     if (!this.any.is(CrossChainInfo.class)) {
       throw new ContractValidateException(
           "contract type error, expected type [RegisterCrossContract], real type [" + this.any
               .getClass() + "]");
     }
-    final CrossChainInfo CrossChainInfo;
+    final CrossChainInfo crossChainInfo;
     try {
-      CrossChainInfo = any.unpack(CrossChainInfo.class);
+      crossChainInfo = any.unpack(CrossChainInfo.class);
     } catch (InvalidProtocolBufferException e) {
       logger.debug(e.getMessage(), e);
       throw new ContractValidateException(e.getMessage());
     }
 
-    byte[] chainId = CrossChainInfo.getChainId().toByteArray();
-    byte[] ownerAddress = CrossChainInfo.getOwnerAddress().toByteArray();
-
+    String chainId = ByteArray.toHexString(crossChainInfo.getChainId().toByteArray());
+    byte[] ownerAddress = crossChainInfo.getOwnerAddress().toByteArray();
+    byte[] proxyAddress = crossChainInfo.getProxyAddress().toByteArray();
+    long registerNum = crossChainInfo.getRegisterNum();
+    if (registerNum <= 0) {
+      throw new ContractValidateException("Invalid registerNum!");
+    }
     // check chain_id is exist
-    if (crossRevokingStore.getChainInfo(ByteArray.toStr(chainId)) != null) {
-      throw new ContractValidateException("ChainId has already been registered!");
+    if (chainId.isEmpty()) {
+      throw new ContractValidateException("No chainId!");
+    }
+    if (crossChainInfo.getChainId().toByteArray().length != ActuatorConstant.CHAIN_ID_LENGTH) {
+      throw new ContractValidateException("Invalid chainId!");
+    }
+    if (crossRevokingStore.getChainInfo(registerNum) != null) {
+      throw new ContractValidateException("registerNum has already been registered!");
     }
 
     if (!DecodeUtil.addressValid(ownerAddress)) {
@@ -102,7 +119,38 @@ public class CrossChainRegisterActuator extends AbstractActuator {
       throw new ContractValidateException("OwnerAccount balance must be greater than BURNED_FOR_REGISTER_CROSS.");
     }
 
-    // todo: whether check all params?
+    if (!DecodeUtil.addressValid(proxyAddress)) {
+      throw new ContractValidateException("Invalid proxyAddress!");
+    }
+
+    // check sr list
+    List<ByteString> srList = crossChainInfo.getSrListList();
+    if (srList.isEmpty()) {
+      throw new ContractValidateException("Invalid srList!");
+    }
+
+    // check other params
+    long maintenanceTimeInterval = crossChainInfo.getMaintenanceTimeInterval();
+    if (maintenanceTimeInterval <= 0) {
+      throw new ContractValidateException("Invalid maintenanceTimeInterval!");
+    }
+    long blockTime = crossChainInfo.getBlockTime();
+    if (blockTime <= 0) {
+      throw new ContractValidateException("Invalid blockTime!");
+    }
+    long beginSyncHeight = crossChainInfo.getBeginSyncHeight();
+    if (beginSyncHeight <= 0) {
+      throw new ContractValidateException("Invalid beginSyncHeight!");
+    }
+    String parentBlockHash =
+            ByteArray.toHexString(crossChainInfo.getParentBlockHash().toByteArray());
+    if (parentBlockHash.isEmpty()) {
+      throw new ContractValidateException("No parentBlockHash!");
+    }
+    if (crossChainInfo.getParentBlockHash().toByteArray().length !=
+            ActuatorConstant.CHAIN_ID_LENGTH) {
+      throw new ContractValidateException("Invalid parentBlockHash!");
+    }
 
     return true;
   }

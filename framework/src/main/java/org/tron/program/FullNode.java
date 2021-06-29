@@ -50,7 +50,6 @@ public class FullNode {
 
     CommonParameter parameter = Args.getInstance();
     load(parameter.getLogbackPath());
-
     if (parameter.isHelp()) {
       logger.info("Here is the help message.");
       return;

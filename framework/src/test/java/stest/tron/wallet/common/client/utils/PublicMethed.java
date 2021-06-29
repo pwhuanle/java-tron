@@ -86,6 +86,7 @@ import org.tron.keystore.WalletFile;
 import org.tron.protos.Protocol;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Block;
+import org.tron.protos.Protocol.CrossMessage;
 import org.tron.protos.Protocol.DelegatedResourceAccountIndex;
 import org.tron.protos.Protocol.Exchange;
 import org.tron.protos.Protocol.Key;
@@ -132,6 +133,7 @@ import org.tron.protos.contract.SmartContractOuterClass.UpdateSettingContract;
 import org.tron.protos.contract.StorageContract.BuyStorageContract;
 import org.tron.protos.contract.StorageContract.SellStorageContract;
 import org.tron.protos.contract.StorageContract.UpdateBrokerageContract;
+import org.tron.protos.contract.WitnessContract.VoteWitnessContract;
 import stest.tron.wallet.common.client.Configuration;
 import stest.tron.wallet.common.client.Parameter.CommonConstant;
 import stest.tron.wallet.common.client.WalletClient;
@@ -930,7 +932,6 @@ public class PublicMethed {
       builder.setToAddress(bsTo);
       builder.setOwnerAddress(bsOwner);
       builder.setAmount(amount);
-
       TransferContract contract = builder.build();
       Protocol.Transaction transaction = blockingStubFull.createTransaction(contract);
       if (transaction == null || transaction.getRawData().getContractCount() == 0) {
@@ -1824,7 +1825,7 @@ public class PublicMethed {
     Integer wait = 0;
     logger.info("Fullnode block num is " + currentBlock.getBlockHeader().getRawData().getNumber());
     while (solidityCurrentBlock.getBlockHeader().getRawData().getNumber()
-        < currentBlock.getBlockHeader().getRawData().getNumber() + 1 && wait <= 10) {
+        < currentBlock.getBlockHeader().getRawData().getNumber() + 1 && wait <= 24) {
       try {
         Thread.sleep(3000);
       } catch (InterruptedException e) {
@@ -1834,7 +1835,7 @@ public class PublicMethed {
           .getNumber());
       solidityCurrentBlock = blockingStubSolidity
           .getNowBlock(GrpcAPI.EmptyMessage.newBuilder().build());
-      if (wait == 10) {
+      if (wait == 24) {
         logger.info("Didn't syn,skip to next case.");
         return false;
       }
@@ -2045,6 +2046,57 @@ public class PublicMethed {
    * constructor.
    */
 
+  public static boolean voteWitness(byte[] ownerAddress, String priKey,
+      HashMap<byte[], Long> witnessMap, WalletGrpc.WalletBlockingStub blockingStubFull) {
+    Wallet.setAddressPreFixByte(CommonConstant.ADD_PRE_FIX_BYTE_MAINNET);
+    ECKey temKey = null;
+    try {
+      BigInteger priK = new BigInteger(priKey, 16);
+      temKey = ECKey.fromPrivate(priK);
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    }
+    final ECKey ecKey = temKey;
+
+    byte[] owner = ownerAddress;
+    VoteWitnessContract.Builder builder = VoteWitnessContract.newBuilder();
+    builder.setOwnerAddress(ByteString.copyFrom(owner));
+    for (byte[] address : witnessMap.keySet()) {
+      VoteWitnessContract.Vote.Builder voteBuilder = VoteWitnessContract.Vote.newBuilder();
+      voteBuilder.setVoteAddress(ByteString.copyFrom(address));
+      voteBuilder.setVoteCount(witnessMap.get(address));
+      builder.addVotes(voteBuilder.build());
+    }
+
+    VoteWitnessContract contract = builder.build();
+    TransactionExtention transactionExtention = blockingStubFull.voteWitnessAccount2(contract);
+    if (transactionExtention == null) {
+      return false;
+    }
+    Return ret = transactionExtention.getResult();
+    if (!ret.getResult()) {
+      System.out.println("Code = " + ret.getCode());
+      System.out.println("Message = " + ret.getMessage().toStringUtf8());
+      return false;
+    }
+    Transaction transaction = transactionExtention.getTransaction();
+    if (transaction == null || transaction.getRawData().getContractCount() == 0) {
+      System.out.println("Transaction is empty");
+      return false;
+    }
+    System.out.println(
+        "Receive txid = " + ByteArray.toHexString(transactionExtention.getTxid().toByteArray()));
+    transaction = signTransaction(ecKey, transaction);
+    GrpcAPI.Return response = broadcastTransaction(transaction, blockingStubFull);
+
+    return response.getResult();
+  }
+
+
+  /**
+   * constructor.
+   */
+
   public static boolean createProposal(byte[] ownerAddress, String priKey,
       HashMap<Long, Long> parametersMap, WalletGrpc.WalletBlockingStub blockingStubFull) {
     Wallet.setAddressPreFixByte(CommonConstant.ADD_PRE_FIX_BYTE_MAINNET);
@@ -2239,6 +2291,17 @@ public class PublicMethed {
     transaction = signTransaction(ecKey, transaction);
     GrpcAPI.Return response = broadcastTransaction(transaction, blockingStubFull);
     return response.getResult();
+  }
+
+  /**
+   * constructor.
+   */
+
+  public static Boolean freezeBalanceGetTronPower(byte[] addRess, long freezeBalance,
+      long freezeDuration, int resourceCode, ByteString receiverAddress, String priKey,
+      WalletGrpc.WalletBlockingStub blockingStubFull) {
+    return freezeBalanceForReceiver(addRess, freezeBalance,
+        freezeDuration, resourceCode, receiverAddress, priKey, blockingStubFull);
   }
 
   /**
@@ -2573,9 +2636,6 @@ public class PublicMethed {
     texBuilder.setTxid(transactionExtention.getTxid());
     transactionExtention = texBuilder.build();
 
-    byte[] contractAddress = generateContractAddress(transactionExtention.getTransaction(), owner);
-    System.out.println(
-        "Your smart contract address will be: " + WalletClient.encode58Check(contractAddress));
     if (transactionExtention == null) {
       return null;
     }
@@ -2594,7 +2654,7 @@ public class PublicMethed {
     System.out.println("txid = " + ByteArray.toHexString(Sha256Hash
         .hash(CommonParameter.getInstance().isECKeyCryptoEngine(),
             transaction.getRawData().toByteArray())));
-    contractAddress = generateContractAddress(transaction, owner);
+    byte[] contractAddress = generateContractAddress(transaction, owner);
     System.out.println(
         "Your smart contract address will be: " + WalletClient.encode58Check(contractAddress));
 
@@ -4269,7 +4329,9 @@ public class PublicMethed {
 
     builder.setOwnerAddress(byteAddreess).setFrozenBalance(frozenBalance)
         .setFrozenDuration(frozenDuration).setResourceValue(resourceCode);
-    builder.setReceiverAddress(receiverAddressBytes);
+    if (receiverAddressBytes != null) {
+      builder.setReceiverAddress(receiverAddressBytes);
+    }
     FreezeBalanceContract contract = builder.build();
     Protocol.Transaction transaction = blockingStubFull.freezeBalance(contract);
 
@@ -7157,15 +7219,13 @@ public class PublicMethed {
   /**
    * constructor.
    */
-  public static Long getAccountBalance(Protocol.Block block,byte[] address,
+  public static Long getAccountBalance(Protocol.Block block, byte[] address,
       WalletGrpc.WalletBlockingStub blockingStubFull) {
     final Long blockNum = block.getBlockHeader().getRawData().getNumber();
     BlockId blockId = new BlockId(
         org.tron.common.utils.Sha256Hash.of(CommonParameter.getInstance().isECKeyCryptoEngine(),
             block.getBlockHeader().getRawData().toByteArray()),
         block.getBlockHeader().getRawData().getNumber());
-
-
 
     BalanceContract.AccountIdentifier accountIdentifier = BalanceContract
         .AccountIdentifier.newBuilder().setAddress(ByteString.copyFrom(address)).build();
@@ -7197,4 +7257,38 @@ public class PublicMethed {
 
 
   }
+
+  /**
+   * 61 constructor.
+   */
+  public static Optional<Transaction> getTransactionFromPending(String txId,
+      WalletGrpc.WalletBlockingStub blockingStubFull) {
+    ByteString bsTxid = ByteString.copyFrom(ByteArray.fromHexString(txId));
+    BytesMessage request = BytesMessage.newBuilder().setValue(bsTxid).build();
+    Transaction transaction;
+    transaction = blockingStubFull.getTransactionFromPending(request);
+    return Optional.ofNullable(transaction);
+  }
+
+
+  /**
+   * constructor.
+   */
+  public static List<String> getTransactionListFromTargetRange(Long startNum, Long endNum,
+      WalletGrpc.WalletBlockingStub blockingStubFull) {
+    Wallet.setAddressPreFixByte(CommonConstant.ADD_PRE_FIX_BYTE_MAINNET);
+    List<String> transactionList = new ArrayList<>();
+    for (Long i = startNum; i <= endNum; i++) {
+      NumberMessage.Builder builder = NumberMessage.newBuilder();
+      builder.setNum(i);
+      Block block = blockingStubFull.getBlockByNum(builder.build());
+      for (Transaction transaction : block.getTransactionsList()) {
+        transactionList.add(ByteArray.toHexString(Sha256Hash.hash(CommonParameter.getInstance()
+            .isECKeyCryptoEngine(), transaction.getRawData().toByteArray())));
+      }
+    }
+    return transactionList;
+  }
+
+
 }

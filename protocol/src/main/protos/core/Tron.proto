@@ -158,6 +158,9 @@ message Account {
   //Freeze and provide balances to other accounts
   int64 delegated_frozen_balance_for_bandwidth = 42;
 
+  int64 old_tron_power = 46;
+  Frozen tron_power = 47;
+
   // this account create time
   int64 create_time = 0x09;
   // this last operation time, including transfer, voting and so on. //FIXME fix grammar
@@ -416,6 +419,7 @@ message Transaction {
   // only support size = 1,  repeated list here for muti-sig extension
   repeated bytes signature = 2;
   repeated Result ret = 5;
+  int64 index = 6;   // the executed order in the block
 }
 
 message TransactionInfo {
@@ -902,6 +906,7 @@ message BlockHeaderRequestMessage {
   bytes chainId = 1;
   int64 blockHeight = 2;
   int64 length = 3;
+  int64 latestMaintenanceTime = 4;
 }
 
 message BlockHeaderInventory {

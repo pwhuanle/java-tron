@@ -171,6 +171,9 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
       .getBytes();
 
   private static final String AUCTION_CONFIG_ROUND = "AUCTION_CONFIG_ROUND";
+  private static final byte[] MIN_AUCTION_VOTE_COUNT = "MIN_AUCTION_VOTE_COUNT".getBytes();
+  private static final byte[] ALLOW_NEW_RESOURCE_MODEL = "ALLOW_NEW_RESOURCE_MODEL".getBytes();
+  private static final byte[] ALLOW_TVM_FREEZE = "ALLOW_TVM_FREEZE".getBytes();
 
   @Autowired
   private DynamicPropertiesStore(@Value("properties") String dbName) {
@@ -363,6 +366,13 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     } catch (IllegalArgumentException e) {
       this.saveTotalEnergyWeight(0L);
     }
+
+    try {
+      this.getTotalTronPowerWeight();
+    } catch (IllegalArgumentException e) {
+      this.saveTotalTronPowerWeight(0L);
+    }
+
 
     try {
       this.getAllowAdaptiveEnergy();
@@ -769,14 +779,33 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     try {
       this.getBurnedForRegisterCross();
     } catch (IllegalArgumentException e) {
-      this.saveBurnedForRegisterCross();
+      this.saveBurnedForRegisterCross(100000000L);
     }
 
-//    try {
-//      this.getAuctionConfig();
-//    } catch (IllegalArgumentException e) {
-//      this.saveAuctionConfig(0L);
-//    }
+    try {
+      this.listAuctionConfigs();
+    } catch (IllegalArgumentException e) {
+      this.saveAuctionConfig(81617162101023L);
+    }
+
+    try {
+      this.getMinAuctionVoteCount();
+    } catch (IllegalArgumentException e) {
+      this.saveMinAuctionVoteCount(10_000_000_000_000L);
+    }
+
+    try {
+      this.getAllowNewResourceModel();
+    } catch (IllegalArgumentException e) {
+      this.saveAllowNewResourceModel(CommonParameter.getInstance().getAllowNewResourceModel());
+    }
+
+    try {
+      this.getAllowTvmFreeze();
+    } catch (IllegalArgumentException e) {
+      this.saveAllowTvmFreeze(
+          CommonParameter.getInstance().getAllowTvmFreeze());
+    }
 
   }
 
@@ -1079,6 +1108,19 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
         .map(ByteArray::toLong)
         .orElseThrow(
             () -> new IllegalArgumentException("not found TOTAL_ENERGY_WEIGHT"));
+  }
+
+  public void saveTotalTronPowerWeight(long totalEnergyWeight) {
+    this.put(DynamicResourceProperties.TOTAL_TRON_POWER_WEIGHT,
+        new BytesCapsule(ByteArray.fromLong(totalEnergyWeight)));
+  }
+
+  public long getTotalTronPowerWeight() {
+    return Optional.ofNullable(getUnchecked(DynamicResourceProperties.TOTAL_TRON_POWER_WEIGHT))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElseThrow(
+            () -> new IllegalArgumentException("not found TOTAL_TRON_POWER_WEIGHT"));
   }
 
   public void saveTotalNetLimit(long totalNetLimit) {
@@ -1971,13 +2013,14 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     try {
       return new BlockCapsule(this.get(LATEST_BLOCK_CAPSULE).getData());
     } catch (BadItemException | ItemNotFoundException e) {
-      logger.error("get latestBlockCapsule failed");
+      throw new IllegalArgumentException("get latestBlockCapsule failed");
     }
-    return null;
   }
 
   public void saveLatestBlockCapsule(BlockCapsule blockCapsule) {
-    this.put(LATEST_BLOCK_CAPSULE, new BytesCapsule(blockCapsule.getData()));
+    if (blockCapsule != null){
+      this.put(LATEST_BLOCK_CAPSULE, new BytesCapsule(blockCapsule.getData()));
+    }
   }
 
   /**
@@ -2065,6 +2108,13 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     long totalEnergyWeight = getTotalEnergyWeight();
     totalEnergyWeight += amount;
     saveTotalEnergyWeight(totalEnergyWeight);
+  }
+
+  //The unit is trx
+  public void addTotalTronPowerWeight(long amount) {
+    long totalWeight = getTotalTronPowerWeight();
+    totalWeight += amount;
+    saveTotalTronPowerWeight(totalWeight);
   }
 
   public void addTotalCreateAccountCost(long fee) {
@@ -2245,6 +2295,7 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
   }
 
   public void saveAuctionConfig(long value) {
+    logger.info("save auction config info = {}", value);
     int round =AuctionConfigParser.getAuctionRound(value);
     //AUCTION_CONFIG_ROUND_1 : 1
     String key = AUCTION_CONFIG_ROUND+"_"+round;
@@ -2255,12 +2306,22 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
   public List<Long> listAuctionConfigs() {
     String startStr = "AUCTION_CONFIG_";
     return  Streams.stream(iterator())
-            .filter(entry -> startStr.startsWith(Objects.requireNonNull(ByteArray.toStr(entry.getKey()))))
+            .filter(entry -> Objects.requireNonNull(ByteArray.toStr(entry.getKey())).startsWith(startStr))
             .map(entry -> entry.getValue().getData())
             .map(entry -> ByteArray.toLong(entry))
             .collect(Collectors.toList());
   }
 
+  public void saveMinAuctionVoteCount(long value) {
+    this.put(MIN_AUCTION_VOTE_COUNT, new BytesCapsule(ByteArray.fromLong(value)));
+  }
+
+  public long getMinAuctionVoteCount() {
+    return Optional.ofNullable(getUnchecked(MIN_AUCTION_VOTE_COUNT))
+            .map(BytesCapsule::getData)
+            .map(ByteArray::toLong)
+            .orElseThrow(() -> new IllegalArgumentException("not found MIN_AUCTION_VOTE_COUNT"));
+  }
 
   public long getSrListCurrentCycle() {
     return Optional.ofNullable(getUnchecked(SR_LIST_CURRENT_CYCLE))
@@ -2280,8 +2341,38 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
         .orElseThrow(() -> new IllegalArgumentException("not found BURNED_FOR_REGISTER_CROSS"));
   }
 
-  public void saveBurnedForRegisterCross() {
-    this.put(BURNED_FOR_REGISTER_CROSS, new BytesCapsule(ByteArray.fromLong(1000000L)));
+  public void saveBurnedForRegisterCross(long burn) {
+    this.put(BURNED_FOR_REGISTER_CROSS, new BytesCapsule(ByteArray.fromLong(burn)));
+  }
+
+  public boolean supportAllowNewResourceModel() {
+    return getAllowNewResourceModel() == 1L;
+  }
+
+  public void saveAllowNewResourceModel(long value) {
+    this.put(ALLOW_NEW_RESOURCE_MODEL, new BytesCapsule(ByteArray.fromLong(value)));
+  }
+
+  public long getAllowNewResourceModel() {
+    return Optional.ofNullable(getUnchecked(ALLOW_NEW_RESOURCE_MODEL))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElseThrow(
+            () -> new IllegalArgumentException("not found ALLOW_NEW_RESOURCE_MODEL"));
+  }
+
+  public void saveAllowTvmFreeze(long allowTvmFreeze) {
+    this.put(DynamicPropertiesStore.ALLOW_TVM_FREEZE,
+        new BytesCapsule(ByteArray.fromLong(allowTvmFreeze)));
+  }
+
+  public long getAllowTvmFreeze() {
+    String msg = "not found ALLOW_TVM_FREEZE";
+    return Optional.ofNullable(getUnchecked(ALLOW_TVM_FREEZE))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElseThrow(
+            () -> new IllegalArgumentException(msg));
   }
 
   private static class DynamicResourceProperties {
@@ -2305,6 +2396,7 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     private static final byte[] TOTAL_ENERGY_AVERAGE_TIME = "TOTAL_ENERGY_AVERAGE_TIME"
         .getBytes();
     private static final byte[] TOTAL_ENERGY_WEIGHT = "TOTAL_ENERGY_WEIGHT".getBytes();
+    private static final byte[] TOTAL_TRON_POWER_WEIGHT = "TOTAL_TRON_POWER_WEIGHT".getBytes();
     private static final byte[] TOTAL_ENERGY_LIMIT = "TOTAL_ENERGY_LIMIT".getBytes();
     private static final byte[] BLOCK_ENERGY_USAGE = "BLOCK_ENERGY_USAGE".getBytes();
     private static final byte[] ADAPTIVE_RESOURCE_LIMIT_MULTIPLIER =

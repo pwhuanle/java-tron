@@ -45,8 +45,10 @@ import org.tron.common.crypto.SignUtils;
 import org.tron.common.overlay.message.Message;
 import org.tron.common.parameter.CommonParameter;
 import org.tron.common.utils.ByteArray;
+import org.tron.common.utils.Commons;
 import org.tron.common.utils.ReflectUtils;
 import org.tron.common.utils.Sha256Hash;
+import org.tron.common.utils.StringUtil;
 import org.tron.core.actuator.TransactionFactory;
 import org.tron.core.db.TransactionContext;
 import org.tron.core.db.TransactionTrace;
@@ -103,6 +105,9 @@ public class TransactionCapsule implements ProtoCapsule<Transaction> {
   @Getter
   @Setter
   private long time;
+  @Getter
+  @Setter
+  private long order;
 
   @Getter
   @Setter
@@ -702,8 +707,10 @@ public class TransactionCapsule implements ProtoCapsule<Transaction> {
       getInstance().getRawData().getContractList().forEach(contract -> {
         toStringBuff.append("[" + i + "] ").append("type: ").append(contract.getType())
             .append("\n");
-        toStringBuff.append("from address=").append(getOwner(contract)).append("\n");
-        toStringBuff.append("to address=").append(getToAddress(contract)).append("\n");
+        toStringBuff.append("from address=")
+                .append(StringUtil.encode58Check(getOwner(contract))).append("\n");
+        toStringBuff.append("to address=")
+                .append(StringUtil.encode58Check(getToAddress(contract))).append("\n");
         if (contract.getType().equals(ContractType.TransferContract)) {
           TransferContract transferContract;
           try {
@@ -796,5 +803,13 @@ public class TransactionCapsule implements ProtoCapsule<Transaction> {
     } catch (InvalidProtocolBufferException e) {
       return null;
     }
+  }
+
+  public void setIndex(int index) {
+    this.transaction = this.transaction.toBuilder().setIndex(index).build();
+  }
+
+  public long getIndex() {
+    return this.transaction.getIndex();
   }
 }

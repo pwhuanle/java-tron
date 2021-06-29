@@ -17,6 +17,7 @@ import org.tron.core.Constant;
 import org.tron.core.config.args.Overlay;
 import org.tron.core.config.args.SeedNode;
 import org.tron.core.config.args.Storage;
+import org.tron.protos.contract.BalanceContract.CrossChainInfo;
 
 public class CommonParameter {
 
@@ -313,6 +314,10 @@ public class CommonParameter {
   @Setter
   public long allowBlackHoleOptimization;
 
+  @Getter
+  @Setter
+  public long allowNewResourceModel;
+
   // @Getter
   // @Setter
   // public long allowShieldedTransaction; //committee parameter
@@ -421,6 +426,10 @@ public class CommonParameter {
 
   @Getter
   @Setter
+  public int maxActiveWitnessNum;
+
+  @Getter
+  @Setter
   public int agreeNodeCount;
 
   @Getter
@@ -454,6 +463,10 @@ public class CommonParameter {
 
   @Getter
   @Setter
+  public long allowTvmFreeze;
+
+  @Getter
+  @Setter
   public boolean openHistoryQueryWhenLiteFN = false;
 
   @Getter
@@ -480,6 +493,22 @@ public class CommonParameter {
   @Getter
   @Setter
   public boolean shouldRegister;
+
+  @Getter
+  @Setter
+  public boolean crossChainWhiteListRefresh;
+
+  @Getter
+  @Setter
+  public List<CrossChainInfo> crossChainWhiteList;
+
+  @Getter
+  @Setter
+  public boolean openPrintLog = true;
+
+  @Getter
+  @Setter
+  public boolean openTransactionSort = false;
 
   private static double calcMaxTimeRatio() {
     //return max(2.0, min(5.0, 5 * 4.0 / max(Runtime.getRuntime().availableProcessors(), 1)));

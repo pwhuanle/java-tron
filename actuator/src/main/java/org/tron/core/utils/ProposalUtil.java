@@ -6,7 +6,6 @@ import org.tron.core.config.Parameter.ForkBlockVersionConsts;
 import org.tron.core.config.Parameter.ForkBlockVersionEnum;
 import org.tron.core.exception.ContractValidateException;
 import org.tron.core.store.DynamicPropertiesStore;
-import org.tron.protos.contract.CrossChain;
 
 public class ProposalUtil {
 
@@ -331,13 +330,13 @@ public class ProposalUtil {
         }
         break;
       }
-      case CROSS_CHAIN: {
+      case ALLOW_CROSS_CHAIN: {
         if (!forkController.pass(ForkBlockVersionEnum.VERSION_4_2)) {
           throw new ContractValidateException(BAD_PARAM_ID);
         }
-        if (value != 1 && value != 0) {
+        if (value != 1) {
           throw new ContractValidateException(
-              "This value[ALLOW_CHANGE_DELEGATION] is only allowed to be 1 or 0");
+                  "This value[ALLOW_CROSS_CHAIN] is only allowed to be 1");
         }
         break;
       }
@@ -352,7 +351,7 @@ public class ProposalUtil {
         }
         break;
       }
-//      case ALLOW_TVM_STAKE: {
+//            case ALLOW_TVM_STAKE: {
 //          if (!forkController.pass(ForkBlockVersionEnum.VERSION_4_1)) {
 //          throw new ContractValidateException(
 //              "Bad chain parameter id [ALLOW_TVM_STAKE]");
@@ -445,9 +444,51 @@ public class ProposalUtil {
         }
         break;
       }
+      case ALLOW_NEW_RESOURCE_MODEL: {
+        if (!forkController.pass(ForkBlockVersionEnum.VERSION_4_2)) {
+          throw new ContractValidateException(
+              "Bad chain parameter id [ALLOW_NEW_RESOURCE_MODEL]");
+        }
+        if (value != 1) {
+          throw new ContractValidateException(
+              "This value[ALLOW_NEW_RESOURCE_MODEL] is only allowed to be 1");
+        }
+        break;
+      }
+      case ALLOW_TVM_FREEZE: {
+        if (!forkController.pass(ForkBlockVersionEnum.VERSION_4_2)) {
+          throw new ContractValidateException(
+              "Bad chain parameter id [ALLOW_TVM_FREEZE]");
+        }
+        if (value != 1) {
+          throw new ContractValidateException(
+              PRE_VALUE_NOT_ONE_ERROR + "ALLOW_TVM_FREEZE" + VALUE_NOT_ONE_ERROR);
+        }
+        if (dynamicPropertiesStore.getAllowDelegateResource() == 0) {
+          throw new ContractValidateException(
+              "[ALLOW_DELEGATE_RESOURCE] proposal must be approved "
+                  + "before [ALLOW_TVM_FREEZE] can be proposed");
+        }
+        if (dynamicPropertiesStore.getAllowMultiSign() == 0) {
+          throw new ContractValidateException(
+              "[ALLOW_MULTI_SIGN] proposal must be approved "
+                  + "before [ALLOW_TVM_FREEZE] can be proposed");
+        }
+        if (dynamicPropertiesStore.getAllowTvmConstantinople() == 0) {
+          throw new ContractValidateException(
+              "[ALLOW_TVM_CONSTANTINOPLE] proposal must be approved "
+                  + "before [ALLOW_TVM_FREEZE] can be proposed");
+        }
+        if (dynamicPropertiesStore.getAllowTvmSolidity059() == 0) {
+          throw new ContractValidateException(
+              "[ALLOW_TVM_SOLIDITY_059] proposal must be approved "
+                  + "before [ALLOW_TVM_FREEZE] can be proposed");
+        }
+        break;
+      }
 
       case AUCTION_CONFIG: {
-        if (!forkController.pass(ForkBlockVersionEnum.VERSION_4_2)) {
+        if (!forkController.pass(ForkBlockVersionEnum.VERSION_5_0)) {
           throw new ContractValidateException("Bad chain parameter id [AUCTION_CONFIG]");
         }
         if (!dynamicPropertiesStore.allowCrossChain()) {
@@ -455,15 +496,43 @@ public class ProposalUtil {
               "CrossChain is not activated, can not set auction config");
         }
         // check end_time value is a Timestamp and make sure the timestamp is greater than now()
-        Long endTime = AuctionConfigParser.getAuctionEndTime(value);
-        if (endTime < System.currentTimeMillis()) {
-          throw new ContractValidateException(
-              "Bad AUCTION_CONFIG parameter value, value must greater than current timestamp.");
-        }
+//        Long endTime = AuctionConfigParser.getAuctionEndTime(value);
+//        if (endTime * 1000 < dynamicPropertiesStore.getLatestBlockHeaderTimestamp()) {
+//          throw new ContractValidateException(
+//              "Parameter configuration error, endTime must be 10 bits long and should be greater than current timestamp");
+//        }
 //        if (value > MAX_TIMESTAMP) {
 //          throw new ContractValidateException(
 //                  "Bad AUCTION_END_TIME parameter value, value is too large.");
 //        }
+        break;
+      }
+      case MIN_AUCTION_VOTE_COUNT: {
+        if (!forkController.pass(ForkBlockVersionEnum.VERSION_5_0)) {
+          throw new ContractValidateException("Bad chain parameter id [MIN_AUCTION_VOTE_COUNT]");
+        }
+        if (!dynamicPropertiesStore.allowCrossChain()) {
+          throw new ContractValidateException(
+                  "CrossChain is not activated, can not set Min Auction Vote Count");
+        }
+        if (value < 0 || value > 10_000_000_000_000_000L) {
+          throw new ContractValidateException(
+                  "Bad MIN_AUCTION_VOTE_COUNT parameter value, valid range is [0,10_000_000_000_000_000L]");
+        }
+        break;
+      }
+      case BURNED_FOR_REGISTER_CROSS: {
+        if (!forkController.pass(ForkBlockVersionEnum.VERSION_5_0)) {
+          throw new ContractValidateException("Bad chain parameter id [BURNED_FOR_REGISTER_CROSS]");
+        }
+        if (!dynamicPropertiesStore.allowCrossChain()) {
+          throw new ContractValidateException(
+                  "CrossChain is not activated, can not set BURNED_FOR_REGISTER_CROSS");
+        }
+        if (value < 0 || value > 1_000_000_000_000L) {
+          throw new ContractValidateException(
+                  "Bad BURNED_FOR_REGISTER_CROSS parameter value, valid range is [0,1_000_000_000_000_000L]");
+        }
         break;
       }
       default:
@@ -519,8 +588,13 @@ public class ProposalUtil {
     MAX_FEE_LIMIT(47), // [0, 10_000_000_000]
     ALLOW_TRANSACTION_FEE_POOL(48), // 0, 1
     ALLOW_BLACKHOLE_OPTIMIZATION(49),// 0,1
-    CROSS_CHAIN(50),
-    AUCTION_CONFIG(51); // timestamp
+    ALLOW_NEW_RESOURCE_MODEL(51),// 0,1
+    ALLOW_TVM_FREEZE(52), // 0, 1
+
+    ALLOW_CROSS_CHAIN(54), // 0, 1
+    AUCTION_CONFIG(55), //
+    MIN_AUCTION_VOTE_COUNT(56), // 0, [0, 10_000_000_000_000]
+    BURNED_FOR_REGISTER_CROSS(57); // 0, [0, 1_000_000_000_000]
 
     private long code;
 

@@ -75,15 +75,16 @@ public class BlockCapsule implements ProtoCapsule<Block> {
       ByteString chainId) {
     // block header raw
     BlockHeader.raw.Builder blockHeaderRawBuild = BlockHeader.raw.newBuilder();
-    BlockHeader.raw blockHeaderRaw = blockHeaderRawBuild
+    blockHeaderRawBuild
         .setNumber(number)
         .setParentHash(hash.getByteString())
         .setTimestamp(when)
         .setVersion(ChainConstant.BLOCK_VERSION)
-        .setWitnessAddress(witnessAddress)
-        .setChainId(chainId)
-        .build();
-
+        .setWitnessAddress(witnessAddress);
+    if (chainId != null){
+      blockHeaderRawBuild.setChainId(chainId);
+    }
+    BlockHeader.raw blockHeaderRaw = blockHeaderRawBuild.build();
     // block header
     BlockHeader.Builder blockHeaderBuild = BlockHeader.newBuilder();
     BlockHeader blockHeader = blockHeaderBuild.setRawData(blockHeaderRaw).build();
@@ -358,6 +359,7 @@ public class BlockCapsule implements ProtoCapsule<Block> {
     if (getCrossMessageList().isEmpty()) {
       toStringBuff.append("cross tx are empty\n");
     } else {
+      toStringBuff.append("cross merkle root=").append(getCrossMerkleRoot()).append("\n");
       toStringBuff.append("cross tx size=").append(getCrossMessageList().size()).append("\n");
     }
 

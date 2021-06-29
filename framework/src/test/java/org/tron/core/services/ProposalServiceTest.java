@@ -1,10 +1,12 @@
 package org.tron.core.services;
 
+import static org.tron.core.utils.ProposalUtil.ProposalType.AUCTION_CONFIG;
 import static org.tron.core.utils.ProposalUtil.ProposalType.WITNESS_127_PAY_PER_BLOCK;
 
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
+
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -54,6 +56,10 @@ public class ProposalServiceTest {
     for (ProposalType proposalType : ProposalType.values()) {
       if (proposalType == WITNESS_127_PAY_PER_BLOCK) {
         proposal = Proposal.newBuilder().putParameters(proposalType.getCode(), 16160).build();
+      } else if (proposalType == AUCTION_CONFIG) {
+        proposal = Proposal.newBuilder().putParameters(proposalType.getCode(),
+            11081617162101023L)
+            .build();
       } else {
         proposal = Proposal.newBuilder().putParameters(proposalType.getCode(), 1).build();
       }

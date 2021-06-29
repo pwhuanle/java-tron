@@ -262,6 +262,7 @@ public class Constant {
   public static final String SEED_NODE_IP_LIST = "seed.node.ip.list";
   public static final String NODE_METRICS_ENABLE = "node.metricsEnable";
   public static final String COMMITTEE_ALLOW_PBFT = "committee.allowPBFT";
+  public static final String MAX_ACTIVE_WITNESS_NUM = "node.maxActiveWitnessNum";
   public static final String NODE_AGREE_NODE_COUNT = "node.agreeNodeCount";
 
   public static final String COMMITTEE_ALLOW_TVM_STAKE = "committee.allowTvmStake";
@@ -270,6 +271,10 @@ public class Constant {
 
   public static final String COMMITTEE_ALLOW_TRANSACTION_FEE_POOL = "committee.allowTransactionFeePool";
   public static final String COMMITTEE_ALLOW_BLACK_HOLE_OPTIMIZATION = "committee.allowBlackHoleOptimization";
+  public static final String COMMITTEE_ALLOW_NEW_RESOURCE_MODEL = "committee.allowNewResourceModel";
+  public static final String COMMITTEE_ALLOW_RECEIPTS_MERKLE_ROOT = "committee.allowReceiptsMerkleRoot";
+
+  public static final String COMMITTEE_ALLOW_TVM_FREEZE = "committee.allowTvmFreeze";
 
   public static final String METRICS_STORAGE_ENABLE = "node.metrics.storageEnable";
   public static final String METRICS_INFLUXDB_IP = "node.metrics.influxdb.ip";
@@ -278,9 +283,13 @@ public class Constant {
   public static final String METRICS_REPORT_INTERVAL = "node.metrics.influxdb.metricsReportInterval";
 
   public static final String HISTORY_BALANCE_LOOKUP = "storage.balance.history.lookup";
+  public static final String OPEN_PRINT_LOG = "node.openPrintLog";
+  public static final String OPEN_TRANSACTION_SORT = "node.openTransactionSort";
 
   public static final String LOCAL_HOST = "127.0.0.1";
   public static final String NODE_CROSS_CHAIN_CONNECT = "node.crossChain.ip";
   public static final String NODE_CROSS_CHAIN_PORT = "node.crossChain.port";
   public static final String NODE_CROSS_CHAIN_SHOULD_REGISTER = "node.crossChain.shouldRegister";
+  public static final String CROSS_CHAIN_WHITE_LIST_REFRESH = "crossChain.refresh";
+  public static final String CROSS_CHAIN_WHITE_LIST = "crossChain.whiteList";
 }

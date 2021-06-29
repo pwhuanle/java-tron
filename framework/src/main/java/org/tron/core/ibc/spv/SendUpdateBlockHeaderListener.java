@@ -51,7 +51,7 @@ public class SendUpdateBlockHeaderListener implements EventListener<PbftBlockCom
     try {
       blockCapsule = manager.getBlockByNum(event.getBlockNum());
     } catch (ItemNotFoundException | BadItemException e) {
-      logger.error("", e);
+      logger.warn("{}", e.getMessage());
     }
     if (blockCapsule == null) {
       return;
@@ -70,7 +70,7 @@ public class SendUpdateBlockHeaderListener implements EventListener<PbftBlockCom
         logger.info("triggerNotice, peer:{}, notice num:{}, chainId:{}",
             peerConnection, noticeMessage.getCurrentBlockHeight(),
             ByteArray.toHexString(noticeMessage.getChainId()));
-        peerConnection.sendMessage(noticeMessage);
+        peerConnection.fastSend(noticeMessage);
       });
     });
   }

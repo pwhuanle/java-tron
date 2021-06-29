@@ -1,17 +1,13 @@
 package org.tron.consensus.dpos;
 
 import static org.tron.common.utils.WalletUtil.getAddressStringList;
-import static org.tron.core.Constant.ONE_YEAR_MS;
 
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +29,7 @@ import org.tron.core.db.CrossRevokingStore;
 import org.tron.core.store.DelegationStore;
 import org.tron.core.store.DynamicPropertiesStore;
 import org.tron.core.store.VotesStore;
+import org.tron.protos.Protocol;
 import org.tron.protos.Protocol.PBFTCommitResult;
 import org.tron.protos.Protocol.PBFTMessage;
 import org.tron.protos.Protocol.PBFTMessage.Raw;
@@ -64,6 +61,7 @@ public class MaintenanceManager {
 
   public void init() {
     currentWitness.addAll(consensusDelegate.getActiveWitnesses());
+    beforeWitness.addAll(currentWitness);
   }
 
   public void applyBlock(BlockCapsule blockCapsule) {
@@ -82,15 +80,27 @@ public class MaintenanceManager {
       if (blockNum != 1) {
         //pbft sr msg
         pbftManager.srPrePrepare(blockCapsule, currentWitness,
-            consensusDelegate.getNextMaintenanceTime());
+            consensusDelegate.getNextMaintenanceTime(), beforeWitness);
       }
     }
     consensusDelegate.saveStateFlag(flag ? 1 : 0);
     //pbft block msg
     if (blockNum == 1) {
       nextMaintenanceTime = consensusDelegate.getNextMaintenanceTime();
+    } else {
+      long maintenanceTimeInterval =
+              consensusDelegate.getDynamicPropertiesStore().getMaintenanceTimeInterval();
+      nextMaintenanceTime = (blockTime / maintenanceTimeInterval + 1) * maintenanceTimeInterval;
+      if (blockTime % maintenanceTimeInterval == 0) {
+        nextMaintenanceTime = nextMaintenanceTime - maintenanceTimeInterval;
+        nextMaintenanceTime = nextMaintenanceTime < 0 ? 0 : nextMaintenanceTime;
+      }
     }
-    pbftManager.blockPrePrepare(blockCapsule, nextMaintenanceTime);
+    if (flag) {
+      pbftManager.blockPrePrepare(blockCapsule, nextMaintenanceTime, beforeWitness);
+    } else {
+      pbftManager.blockPrePrepare(blockCapsule, nextMaintenanceTime, currentWitness);
+    }
   }
 
   private void updateWitnessValue(List<ByteString> srList) {
@@ -167,59 +177,102 @@ public class MaintenanceManager {
     // update parachains
     long currentBlockHeaderTimestamp = dynamicPropertiesStore.getLatestBlockHeaderTimestamp();
     List<Long> auctionRoundList = dynamicPropertiesStore.listAuctionConfigs();
+    long minAuctionVoteCount = dynamicPropertiesStore.getMinAuctionVoteCount();
     auctionRoundList.forEach(value -> {
       CrossChain.AuctionRoundContract roundInfo = AuctionConfigParser.parseAuctionConfig(value);
-      if (roundInfo.getEndTime() < currentBlockHeaderTimestamp) {
+      if (roundInfo != null && roundInfo.getRound() > 0
+          && (roundInfo.getEndTime() * 1000) <= currentBlockHeaderTimestamp) {
         CrossRevokingStore crossRevokingStore = consensusDelegate.getCrossRevokingStore();
-        if (currentBlockHeaderTimestamp < roundInfo.getEndTime() + roundInfo.getDuration() * 86400) {
+        if (currentBlockHeaderTimestamp
+            <= (roundInfo.getEndTime() + roundInfo.getDuration() * 86400) * 1000) {
           if (crossRevokingStore.getParaChainList(roundInfo.getRound()).isEmpty()) {
             // set parachains
-            List<Pair<String, Long>> eligibleChainLists =
-                    crossRevokingStore.getEligibleChainLists(roundInfo.getRound(), roundInfo.getSlotCount());
-            List<String> chainIds = eligibleChainLists.stream().map(Pair::getKey)
-                    .collect(Collectors.toList());
-            crossRevokingStore.updateParaChains(roundInfo.getRound(), chainIds);
-
-            setChainInfo(chainIds);
+            List<Pair<Long, Long>> eligibleChainLists = crossRevokingStore
+                    .getChainVoteCountList(roundInfo.getRound(), minAuctionVoteCount);
+            updateParaChains(eligibleChainLists, roundInfo);
           }
         } else {
           crossRevokingStore.deleteParaChains(roundInfo.getRound());
+          crossRevokingStore.deleteParaChainRegisterNums(roundInfo.getRound());
         }
       }
     });
 
   }
 
-  private void setChainInfo(List<String> chainIds) {
+  private void updateParaChains(List<Pair<Long, Long>> eligibleChainLists,
+                                CrossChain.AuctionRoundContract roundInfo) {
     CrossRevokingStore crossRevokingStore = consensusDelegate.getCrossRevokingStore();
-    CommonDataBase commonDataBase = consensusDelegate.getChainBaseManager().getCommonDataBase();
-    chainIds.forEach(chainId -> {
+    List<Long> registerNums = new LinkedList<>();
+    List<String> chainIds = new LinkedList<>();
+    for (Pair<Long, Long> voteInfo : eligibleChainLists) {
+      if (chainIds.size() >= roundInfo.getSlotCount()) {
+        break;
+      }
       try {
-        byte[] chainInfoData = crossRevokingStore.getChainInfo(chainId);
+        byte[] chainInfoData = crossRevokingStore.getChainInfo(voteInfo.getKey());
         if (ByteArray.isEmpty(chainInfoData)) {
           return;
         }
         CrossChainInfo crossChainInfo = CrossChainInfo.parseFrom(chainInfoData);
-        if (crossChainInfo.getBeginSyncHeight() - 1 <= commonDataBase
+        String chainId = ByteArray.toHexString(crossChainInfo.getChainId().toByteArray());
+        if (!chainIds.contains(chainId)) {
+          chainIds.add(chainId);
+          registerNums.add(voteInfo.getKey());
+        }
+      } catch (InvalidProtocolBufferException e) {
+        logger.error("chain {} get the info fail!", voteInfo.getKey(), e);
+      }
+    }
+
+    crossRevokingStore.updateParaChainRegisterNums(roundInfo.getRound(), registerNums);
+    crossRevokingStore.updateParaChains(roundInfo.getRound(), chainIds);
+    crossRevokingStore.updateParaChainsHistory(chainIds);
+
+    setChainInfo(registerNums);
+  }
+
+  private void setChainInfo(List<Long> registerNums) {
+    CrossRevokingStore crossRevokingStore = consensusDelegate.getCrossRevokingStore();
+    CommonDataBase commonDataBase = consensusDelegate.getChainBaseManager().getCommonDataBase();
+    registerNums.forEach(registerNum -> {
+      try {
+        byte[] chainInfoData = crossRevokingStore.getChainInfo(registerNum);
+        if (ByteArray.isEmpty(chainInfoData)) {
+          return;
+        }
+        CrossChainInfo crossChainInfo = CrossChainInfo.parseFrom(chainInfoData);
+        String chainId = ByteArray.toHexString(crossChainInfo.getChainId().toByteArray());
+        if (crossChainInfo.getBeginSyncHeight() <= commonDataBase
             .getLatestHeaderBlockNum(chainId)) {
           return;
         }
-        commonDataBase.saveLatestHeaderBlockNum(chainId, crossChainInfo.getBeginSyncHeight() - 1);
+        commonDataBase.saveProxyAddress(chainId,
+            ByteArray.toHexString(crossChainInfo.getProxyAddress().toByteArray()));
+        commonDataBase.saveLatestHeaderBlockNum(chainId,
+                crossChainInfo.getBeginSyncHeight() - 1, false);
         commonDataBase.saveLatestBlockHeaderHash(chainId,
             ByteArray.toHexString(crossChainInfo.getParentBlockHash().toByteArray()));
+        commonDataBase.saveChainMaintenanceTimeInterval(chainId,
+            crossChainInfo.getMaintenanceTimeInterval());
         long round = crossChainInfo.getBlockTime() / crossChainInfo.getMaintenanceTimeInterval();
         long epoch = (round + 1) * crossChainInfo.getMaintenanceTimeInterval();
         if (crossChainInfo.getBlockTime() % crossChainInfo.getMaintenanceTimeInterval() == 0) {
           epoch = epoch - crossChainInfo.getMaintenanceTimeInterval();
           epoch = epoch < 0 ? 0 : epoch;
         }
-        PBFTMessage.Raw pbftMsgRaw = Raw.newBuilder().setData(crossChainInfo.getSrList())
+        Protocol.SRL.Builder srlBuilder = Protocol.SRL.newBuilder();
+        srlBuilder.addAllSrAddress(crossChainInfo.getSrListList());
+        PBFTMessage.Raw pbftMsgRaw = Raw.newBuilder().setData(srlBuilder.build().toByteString())
             .setEpoch(epoch).build();
         PBFTCommitResult.Builder builder = PBFTCommitResult.newBuilder();
         builder.setData(pbftMsgRaw.toByteString());
         commonDataBase.saveSRL(chainId, epoch, builder.build());
+        commonDataBase.saveCrossNextMaintenanceTime(chainId, epoch);
+        int agreeNodeCount = crossChainInfo.getSrListList().size() * 2 / 3 + 1;
+        commonDataBase.saveAgreeNodeCount(chainId, agreeNodeCount);
       } catch (InvalidProtocolBufferException e) {
-        logger.error("chain {} get the info fail!", chainId, e);
+        logger.error("chain {} get the info fail!", registerNum, e);
       }
     });
   }

@@ -280,6 +280,12 @@ public class FullNodeHttpApiService implements Service {
 
   @Autowired
   private LiteFnQueryHttpFilter liteFnQueryHttpFilter;
+  @Autowired
+  private GetTransactionFromPendingServlet getTransactionFromPendingServlet;
+  @Autowired
+  private GetTransactionListFromPendingServlet getTransactionListFromPendingServlet;
+  @Autowired
+  private GetPendingSizeServlet getPendingSizeServlet;
 
   @Autowired
   private RegisterCrossChainServlet registerCrossChainServlet;
@@ -289,6 +295,9 @@ public class FullNodeHttpApiService implements Service {
 
   @Autowired
   private GetRegisterCrossChainListServlet getRegisterCrossChainListServlet;
+
+  @Autowired
+  private  GetRegisterCrossChainInfoServlet getRegisterCrossChainInfoServlet;
 
   @Autowired
   private VoteCrossChainServlet voteCrossChainServlet;
@@ -301,6 +310,12 @@ public class FullNodeHttpApiService implements Service {
 
   @Autowired
   private GetCrossChainVoteSummaryListServlet getCrossChainVoteSummaryListServlet;
+
+  @Autowired
+  private GetParaChainListServlet getParaChainListServlet;
+
+  @Autowired
+  private GetCrossChainAuctionConfigDetailListServlet getCrossChainAuctionConfigDetailListServlet;
 
   private static String getParamsFile(String fileName) {
     InputStream in = Thread.currentThread().getContextClassLoader()
@@ -544,17 +559,29 @@ public class FullNodeHttpApiService implements Service {
       context.addServlet(new ServletHolder(getBlockBalanceServlet),
           "/wallet/getblockbalance");
       context.addServlet(new ServletHolder(getBurnTrxServlet), "/wallet/getburntrx");
+      context.addServlet(new ServletHolder(getTransactionFromPendingServlet),
+          "/wallet/gettransactionfrompending");
+      context.addServlet(new ServletHolder(getTransactionListFromPendingServlet),
+          "/wallet/gettransactionlistfrompending");
+      context.addServlet(new ServletHolder(getPendingSizeServlet), "/wallet/getpendingsize");
 
-      context.addServlet(new ServletHolder(registerCrossChainServlet), "/wallet/registercrosschain");
+      context.addServlet(new ServletHolder(registerCrossChainServlet),
+          "/wallet/registercrosschain");
       context.addServlet(new ServletHolder(updateCrossChainServlet), "/wallet/updatecrosschain");
       context.addServlet(new ServletHolder(getRegisterCrossChainListServlet),
               "/wallet/getregistercrosschainlist");
+      context.addServlet(new ServletHolder(getRegisterCrossChainInfoServlet),
+              "/wallet/getregistercrosschaininfo");
       context.addServlet(new ServletHolder(voteCrossChainServlet), "/wallet/votecrosschain");
       context.addServlet(new ServletHolder(unvoteCrossChainServlet), "/wallet/unvotecrosschain");
       context.addServlet(new ServletHolder(getCrossChainVoteDetailListServlet),
               "/wallet/getcrosschainvotedetaillist");
       context.addServlet(new ServletHolder(getCrossChainVoteSummaryListServlet),
               "/wallet/getcrosschainvotesummarylist");
+      context.addServlet(new ServletHolder(getParaChainListServlet),
+              "/wallet/getparachainlist");
+      context.addServlet(new ServletHolder(getCrossChainAuctionConfigDetailListServlet),
+          "/wallet/getauctionconfiglist");
 
       int maxHttpConnectNumber = Args.getInstance().getMaxHttpConnectNumber();
       if (maxHttpConnectNumber > 0) {

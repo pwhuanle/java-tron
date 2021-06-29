@@ -1,6 +1,5 @@
 package org.tron.consensus.dpos;
 
-import static org.tron.core.config.Parameter.ChainConstant.MAX_ACTIVE_WITNESS_NUM;
 import static org.tron.core.config.Parameter.ChainConstant.SOLIDIFIED_THRESHOLD;
 
 import com.google.protobuf.ByteString;
@@ -25,9 +24,12 @@ import org.tron.consensus.base.ConsensusInterface;
 import org.tron.consensus.base.Param;
 import org.tron.consensus.base.Param.Miner;
 import org.tron.consensus.base.PbftInterface;
+import org.tron.core.ChainBaseManager;
 import org.tron.core.capsule.BlockCapsule;
 import org.tron.core.capsule.WitnessCapsule;
 import org.tron.core.db.CommonDataBase;
+import org.tron.core.exception.BadItemException;
+import org.tron.core.exception.ItemNotFoundException;
 
 @Slf4j(topic = "consensus")
 @Component
@@ -35,6 +37,9 @@ public class DposService implements ConsensusInterface {
 
   @Autowired
   private ConsensusDelegate consensusDelegate;
+
+  @Autowired
+  private ChainBaseManager chainBaseManager;
 
   @Autowired
   private DposTask dposTask;
@@ -73,6 +78,8 @@ public class DposService implements ConsensusInterface {
   private GenesisBlock genesisBlock;
   @Getter
   private Map<ByteString, Miner> miners = new HashMap<>();
+  @Getter
+  private int maxActiveWitnessNum;
 
   @Override
   public void start(Param param) {
@@ -83,6 +90,7 @@ public class DposService implements ConsensusInterface {
     this.blockHandle = param.getBlockHandle();
     this.genesisBlock = param.getGenesisBlock();
     this.genesisBlockTime = Long.parseLong(param.getGenesisBlock().getTimestamp());
+    this.maxActiveWitnessNum = param.getMaxActiveWitnessNum();
     param.getMiners().forEach(miner -> miners.put(miner.getWitnessAddress(), miner));
     pbftInterface = param.getPbftInterface();
 
@@ -151,7 +159,7 @@ public class DposService implements ConsensusInterface {
     return true;
   }
 
-  private void updateSolidBlock() {
+  public synchronized void updateSolidBlock() {
     long newSolidNum;
     if (!consensusDelegate.getDynamicPropertiesStore().allowCrossChain() || pbftInterface.isSyncing()) {
       List<Long> numbers = consensusDelegate.getActiveWitnesses().stream()
@@ -172,6 +180,16 @@ public class DposService implements ConsensusInterface {
     }
     CommonParameter.getInstance()
         .setOldSolidityBlockNum(consensusDelegate.getLatestSolidifiedBlockNum());
+    // update pbft when node is syncing
+    try {
+      BlockCapsule blockCapsule = chainBaseManager.getBlockByNum(newSolidNum);
+      if (newSolidNum > commonDataBase.getLatestPbftBlockNum()) {
+        commonDataBase.saveLatestPbftBlockHash(blockCapsule.getBlockId().getBytes());
+        commonDataBase.saveLatestPbftBlockNum(newSolidNum);
+      }
+    } catch (ItemNotFoundException | BadItemException e) {
+      logger.error("update latest pbft block failed, err: {}", e.getMessage());
+    }
     consensusDelegate.saveLatestSolidifiedBlockNum(newSolidNum);
     logger.info("Update solid block number to {}", newSolidNum);
   }
@@ -182,9 +200,9 @@ public class DposService implements ConsensusInterface {
         .reversed()
         .thenComparing(Comparator.comparingInt(ByteString::hashCode).reversed()));
 
-    if (list.size() > MAX_ACTIVE_WITNESS_NUM) {
+    if (list.size() > maxActiveWitnessNum) {
       consensusDelegate
-          .saveActiveWitnesses(list.subList(0, MAX_ACTIVE_WITNESS_NUM));
+          .saveActiveWitnesses(list.subList(0, maxActiveWitnessNum));
     } else {
       consensusDelegate.saveActiveWitnesses(list);
     }

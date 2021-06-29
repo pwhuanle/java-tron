@@ -3,7 +3,9 @@ package org.tron.core.ibc.communicate;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +22,7 @@ import org.tron.core.capsule.BlockCapsule;
 import org.tron.core.capsule.BlockCapsule.BlockId;
 import org.tron.core.capsule.BlockHeaderCapsule;
 import org.tron.core.capsule.PbftSignCapsule;
+import org.tron.core.capsule.TransactionCapsule;
 import org.tron.core.capsule.utils.MerkleTree;
 import org.tron.core.capsule.utils.MerkleTree.ProofLeaf;
 import org.tron.core.config.args.Args;
@@ -28,10 +31,12 @@ import org.tron.core.db.BlockHeaderIndexStore;
 import org.tron.core.db.BlockHeaderStore;
 import org.tron.core.db.BlockIndexStore;
 import org.tron.core.db.BlockStore;
+import org.tron.core.db.CrossStore;
 import org.tron.core.db.Manager;
 import org.tron.core.db.PbftSignDataStore;
 import org.tron.core.db.TransactionStore;
 import org.tron.core.exception.BadItemException;
+import org.tron.core.exception.P2pException;
 import org.tron.core.ibc.common.CrossUtils;
 import org.tron.core.ibc.connect.CrossChainConnectPool;
 import org.tron.core.net.message.CrossChainMessage;
@@ -71,7 +76,6 @@ public class CommunicateService implements Communicate {
   @Autowired
   private BlockHeaderIndexStore blockHeaderIndexStore;
 
-  @PreDestroy
   public void destroy() {
     executorService.shutdown();
   }
@@ -82,11 +86,17 @@ public class CommunicateService implements Communicate {
     executorService
         .scheduleWithFixedDelay(() -> receiveCrossMsgCache.asMap().forEach((hash, crossMessage) -> {
           try {
-            if (validProof(crossMessage)) {
+            // skip check when the block header has not been synced.
+            if (crossMessage.getRootHeight() > getHeight(crossMessage.getFromChainId())
+                    || crossMessage.getRootHeight()
+                    > chainBaseManager.getCommonDataBase().getLatestPBFTBlockNum(
+                            ByteArray.toHexString(crossMessage.getFromChainId().toByteArray()))) {
+              return;
+            }
+            if (broadcastCheck(crossMessage)) {
+              manager.addCrossTx(crossMessage);
               broadcastCrossMessage(crossMessage);
               receiveCrossMsgCache.invalidate(hash);
-            } else {
-              logger.warn("valid proof fail!");
             }
           } catch (Exception e) {
             logger.error("", e);
@@ -126,7 +136,7 @@ public class CommunicateService implements Communicate {
               .setLeftOrRight(proofLeaf.isLeftOrRight()).build();
         }).collect(Collectors.toList());
         //set the proof and root height
-        crossMessage = crossMessage.toBuilder().addAllProof(proofList)
+        crossMessage = crossMessage.toBuilder().clearProof().addAllProof(proofList)
             .setRootHeight(blockNum).build();
         //send data
         sendData(crossMessage);
@@ -160,9 +170,8 @@ public class CommunicateService implements Communicate {
     }
     MerkleTree merkleTree = MerkleTree.getInstance();
     List<ProofLeaf> proofLeafList = proofList.stream().map(proof -> merkleTree.new ProofLeaf(
-        Sha256Hash.of(true, proof.getHash().toByteArray()),
+        Sha256Hash.wrap(proof.getHash()),
         proof.getLeftOrRight())).collect(Collectors.toList());
-    logger.debug("root:{}, tx:{}", root, txHash);
     return merkleTree.validProof(root, proofLeafList, txHash);
   }
 
@@ -172,15 +181,43 @@ public class CommunicateService implements Communicate {
   @Override
   public boolean checkCommit(Sha256Hash hash) {
     TransactionStore transactionStore = chainBaseManager.getTransactionStore();
-    PbftSignDataStore pbftSignDataStore = chainBaseManager.getPbftSignDataStore();
     try {
-      long blockNum = transactionStore.get(hash.getBytes()).getBlockNum();
-      PbftSignCapsule pbftSignCapsule = pbftSignDataStore.getBlockSignData(blockNum);
-      return pbftSignCapsule != null;
+      TransactionCapsule transactionCapsule = transactionStore.get(hash.getBytes());
+      if (transactionCapsule == null) {
+        logger.warn("check commit err, tx is null, hash: {}", hash);
+        return false;
+      }
+      long blockNum = transactionCapsule.getBlockNum();
+      return chainBaseManager.getCommonDataBase().getLatestPbftBlockNum() >= blockNum;
     } catch (BadItemException e) {
-      logger.error("{}", e.getMessage());
+      logger.warn("check commit err, hash: {}, err: {}", hash, e.getMessage());
     }
     return false;
+  }
+
+  public boolean broadcastCheck(CrossMessage crossMessage) {
+    CrossStore crossStore = chainBaseManager.getCrossStore();
+    if (!isSyncFinish()) {
+      logger.info("sync is not finished, stop send cross message");
+      return false;
+    }
+    if (crossMessage.getType() != Type.TIME_OUT
+            && !validProof(crossMessage)) {
+      //todo: define a new reason code
+      //peer.disconnect(ReasonCode.BAD_TX);
+      logger.error("broadcastCheck: valid proof failed");
+      return false;
+    }
+    Sha256Hash txId = Sha256Hash
+            .of(true, crossMessage.getTransaction().getRawData().toByteArray());
+    if (crossStore.getReceiveCrossMsgUnEx(txId) != null) {
+      // already broadcasted
+      receiveCrossMsgCache.invalidate(txId);
+      return false;
+    }
+    //todo:timeout message how to do,save or not
+    crossStore.saveReceiveCrossMsg(txId, crossMessage);
+    return true;
   }
 
   @Override
@@ -236,6 +273,8 @@ public class CommunicateService implements Communicate {
     }
     BlockId blockId = blockHeaderIndexStore.getUnchecked(chainId, crossMessage.getRootHeight());
     if (blockId == null) {
+      logger.warn("block header index not found, chainId: {}, high: {}",
+              chainId, crossMessage.getRootHeight());
       return null;
     }
     if (blockId.getNum() > chainBaseManager.getCommonDataBase().getLatestPBFTBlockNum(chainId)) {
@@ -247,6 +286,8 @@ public class CommunicateService implements Communicate {
     if (blockHeaderCapsule != null) {
       return blockHeaderCapsule.getCrossMerkleRoot().equals(Sha256Hash.ZERO_HASH)
           ? blockHeaderCapsule.getMerkleRoot() : blockHeaderCapsule.getCrossMerkleRoot();
+    } else {
+      logger.warn("block header is null, chainId:{}, blockId: {}", chainId, blockId);
     }
     return null;
   }

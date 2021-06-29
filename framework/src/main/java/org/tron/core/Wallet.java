@@ -22,6 +22,9 @@ import static org.tron.common.utils.Commons.getAssetIssueStoreFinal;
 import static org.tron.common.utils.Commons.getExchangeStoreFinal;
 import static org.tron.common.utils.WalletUtil.isConstant;
 import static org.tron.core.config.Parameter.ChainConstant.BLOCK_PRODUCED_INTERVAL;
+import static org.tron.core.config.Parameter.ChainConstant.TRX_PRECISION;
+import static org.tron.core.config.Parameter.DatabaseConstants.CROSS_CHAIN_COUNT_LIMIT_MAX;
+import static org.tron.core.config.Parameter.DatabaseConstants.CROSS_CHAIN_VOTE_COUNT_LIMIT_MAX;
 import static org.tron.core.config.Parameter.DatabaseConstants.EXCHANGE_COUNT_LIMIT_MAX;
 import static org.tron.core.config.Parameter.DatabaseConstants.MARKET_COUNT_LIMIT_MAX;
 import static org.tron.core.config.Parameter.DatabaseConstants.PROPOSAL_COUNT_LIMIT_MAX;
@@ -103,7 +106,13 @@ import org.tron.common.overlay.discover.node.NodeManager;
 import org.tron.common.overlay.message.Message;
 import org.tron.common.parameter.CommonParameter;
 import org.tron.common.runtime.ProgramResult;
-import org.tron.common.utils.*;
+import org.tron.common.utils.AuctionConfigParser;
+import org.tron.common.utils.ByteArray;
+import org.tron.common.utils.ByteUtil;
+import org.tron.common.utils.DecodeUtil;
+import org.tron.common.utils.Sha256Hash;
+import org.tron.common.utils.Utils;
+import org.tron.common.utils.WalletUtil;
 import org.tron.common.zksnark.IncrementalMerkleTreeContainer;
 import org.tron.common.zksnark.IncrementalMerkleVoucherContainer;
 import org.tron.common.zksnark.JLibrustzcash;
@@ -140,7 +149,12 @@ import org.tron.core.capsule.TransactionRetCapsule;
 import org.tron.core.capsule.WitnessCapsule;
 import org.tron.core.capsule.utils.MarketUtils;
 import org.tron.core.config.args.Args;
-import org.tron.core.db.*;
+import org.tron.core.db.BandwidthProcessor;
+import org.tron.core.db.BlockIndexStore;
+import org.tron.core.db.CrossRevokingStore;
+import org.tron.core.db.EnergyProcessor;
+import org.tron.core.db.Manager;
+import org.tron.core.db.TransactionContext;
 import org.tron.core.exception.AccountResourceInsufficientException;
 import org.tron.core.exception.BadItemException;
 import org.tron.core.exception.ContractExeException;
@@ -161,7 +175,16 @@ import org.tron.core.exception.ZksnarkException;
 import org.tron.core.net.TronNetDelegate;
 import org.tron.core.net.TronNetService;
 import org.tron.core.net.message.TransactionMessage;
-import org.tron.core.store.*;
+import org.tron.core.store.AccountIdIndexStore;
+import org.tron.core.store.AccountStore;
+import org.tron.core.store.AccountTraceStore;
+import org.tron.core.store.BalanceTraceStore;
+import org.tron.core.store.ContractStore;
+import org.tron.core.store.DynamicPropertiesStore;
+import org.tron.core.store.MarketOrderStore;
+import org.tron.core.store.MarketPairPriceToOrderStore;
+import org.tron.core.store.MarketPairToPriceStore;
+import org.tron.core.store.StoreFactory;
 import org.tron.core.utils.TransactionUtil;
 import org.tron.core.zen.ShieldedTRC20ParametersBuilder;
 import org.tron.core.zen.ShieldedTRC20ParametersBuilder.ShieldedTRC20ParametersType;
@@ -991,6 +1014,26 @@ public class Wallet {
         .setValue(dbManager.getDynamicPropertiesStore().getCrossChain())
         .build());
 
+    builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
+            .setKey("getMinAuctionVoteCount")
+            .setValue(dbManager.getDynamicPropertiesStore().getMinAuctionVoteCount())
+            .build());
+
+    builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
+            .setKey("getBurnedForRegisterCross")
+            .setValue(dbManager.getDynamicPropertiesStore().getBurnedForRegisterCross())
+            .build());
+
+    builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
+        .setKey("getAllowNewResourceModel")
+        .setValue(dbManager.getDynamicPropertiesStore().getAllowNewResourceModel())
+        .build());
+
+    builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
+        .setKey("getAllowTvmFreeze")
+        .setValue(dbManager.getDynamicPropertiesStore().getAllowTvmFreeze())
+        .build());
+
     return builder.build();
   }
 
@@ -1118,6 +1161,8 @@ public class Wallet {
     long freeNetLimit = chainBaseManager.getDynamicPropertiesStore().getFreeNetLimit();
     long totalNetLimit = chainBaseManager.getDynamicPropertiesStore().getTotalNetLimit();
     long totalNetWeight = chainBaseManager.getDynamicPropertiesStore().getTotalNetWeight();
+    long totalTronPowerWeight = chainBaseManager.getDynamicPropertiesStore()
+        .getTotalTronPowerWeight();
     long energyLimit = energyProcessor
         .calculateGlobalEnergyLimit(accountCapsule);
     long totalEnergyLimit =
@@ -1127,6 +1172,8 @@ public class Wallet {
 
     long storageLimit = accountCapsule.getAccountResource().getStorageLimit();
     long storageUsage = accountCapsule.getAccountResource().getStorageUsage();
+    long allTronPowerUsage = accountCapsule.getTronPowerUsage();
+    long allTronPower = accountCapsule.getAllTronPower() / TRX_PRECISION;
 
     Map<String, Long> assetNetLimitMap = new HashMap<>();
     Map<String, Long> allFreeAssetNetUsage = setAssetNetLimit(assetNetLimitMap, accountCapsule);
@@ -1137,8 +1184,11 @@ public class Wallet {
         .setNetLimit(netLimit)
         .setTotalNetLimit(totalNetLimit)
         .setTotalNetWeight(totalNetWeight)
+        .setTotalTronPowerWeight(totalTronPowerWeight)
         .setEnergyLimit(energyLimit)
         .setEnergyUsed(accountCapsule.getAccountResource().getEnergyUsage())
+        .setTronPowerUsed(allTronPowerUsage)
+        .setTronPowerLimit(allTronPower)
         .setTotalEnergyLimit(totalEnergyLimit)
         .setTotalEnergyWeight(totalEnergyWeight)
         .setStorageLimit(storageLimit)
@@ -3735,6 +3785,7 @@ public class Wallet {
   public GrpcAPI.RegisterCrossChainList getRegisterCrossList(long offset, long limit) {
     GrpcAPI.RegisterCrossChainList.Builder builder = GrpcAPI.RegisterCrossChainList.newBuilder();
     CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
+    limit = limit > CROSS_CHAIN_COUNT_LIMIT_MAX ? CROSS_CHAIN_COUNT_LIMIT_MAX : limit;
     List<byte[]> chainList = crossRevokingStore.getRegisterChainList(offset, limit);
     if (CollectionUtils.isEmpty(chainList)) {
       return null;
@@ -3749,10 +3800,27 @@ public class Wallet {
     return builder.build();
   }
 
-  public GrpcAPI.CrossChainVoteDetailList getCrossChainVoteDetailList(long offset, long limit, String chainId,int round) {
-    GrpcAPI.CrossChainVoteDetailList.Builder builder = GrpcAPI.CrossChainVoteDetailList.newBuilder();
+  public BalanceContract.CrossChainInfo getRegisterCrossChainInfo(long registerNum) {
+    byte[] crossChainInfoBytes =
+            chainBaseManager.getCrossRevokingStore().getChainInfo(registerNum);
+    if (crossChainInfoBytes != null) {
+      try {
+        return BalanceContract.CrossChainInfo.parseFrom(crossChainInfoBytes);
+      } catch (InvalidProtocolBufferException e) {
+        e.printStackTrace();
+      }
+    }
+    return null;
+  }
+
+  public GrpcAPI.CrossChainVoteDetailList getCrossChainVoteDetailList(long offset, long limit,
+                                                                      long registerNum,int round) {
+    GrpcAPI.CrossChainVoteDetailList.Builder builder = GrpcAPI.CrossChainVoteDetailList
+        .newBuilder();
     CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
-    List<byte[]> chainVoteList = crossRevokingStore.getCrossChainVoteDetailList(offset, limit, chainId,round);
+    limit = limit > CROSS_CHAIN_VOTE_COUNT_LIMIT_MAX ? CROSS_CHAIN_VOTE_COUNT_LIMIT_MAX : limit;
+    List<byte[]> chainVoteList = crossRevokingStore.getCrossChainVoteDetailList(offset, limit,
+            registerNum, round);
     if (CollectionUtils.isEmpty(chainVoteList)) {
       return null;
     }
@@ -3766,37 +3834,60 @@ public class Wallet {
     return builder.build();
   }
 
-  public GrpcAPI.CrossChainVoteSummaryList getCrossChainTotalVoteList(long offset, long limit, int round) {
-    GrpcAPI.CrossChainVoteSummaryList.Builder builder = GrpcAPI.CrossChainVoteSummaryList.newBuilder();
+  public GrpcAPI.CrossChainVoteSummaryList getCrossChainTotalVoteList(long offset, long limit,
+                                                                      int round) {
+    GrpcAPI.CrossChainVoteSummaryList.Builder builder = GrpcAPI.CrossChainVoteSummaryList
+        .newBuilder();
     CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
-    List<org.tron.common.utils.Pair<String, Long>> chainVoteList = crossRevokingStore.getCrossChainTotalVoteList(offset, limit, round);
+    limit = limit > CROSS_CHAIN_VOTE_COUNT_LIMIT_MAX ? CROSS_CHAIN_VOTE_COUNT_LIMIT_MAX : limit;
+    List<org.tron.common.utils.Pair<Long, Long>> chainVoteList = crossRevokingStore
+        .getCrossChainTotalVoteList(offset, limit, round);
     if (CollectionUtils.isEmpty(chainVoteList)) {
       return null;
     }
     chainVoteList.forEach(voteInfo -> {
-        GrpcAPI.CrossChainVoteSummary.Builder totalVoteBuilder = GrpcAPI.CrossChainVoteSummary.newBuilder();
-        totalVoteBuilder.setChainId(ByteString.copyFrom(voteInfo.getKey().getBytes()));
-        totalVoteBuilder.setAmount(voteInfo.getValue());
-        builder.addCrossChainVoteSummary(totalVoteBuilder.build());
+      GrpcAPI.CrossChainVoteSummary.Builder totalVoteBuilder = GrpcAPI.CrossChainVoteSummary
+          .newBuilder();
+      totalVoteBuilder.setRegisterNum(voteInfo.getKey());
+      totalVoteBuilder.setAmount(voteInfo.getValue());
+      builder.addCrossChainVoteSummary(totalVoteBuilder.build());
     });
     return builder.build();
   }
 
-  public GrpcAPI.CrossChainAuctinConfigDetailList getCrossChainAuctionConfigDetailList() {
-    GrpcAPI.CrossChainAuctinConfigDetailList.Builder builder = GrpcAPI.CrossChainAuctinConfigDetailList.newBuilder();
+  public GrpcAPI.CrossChainAuctionConfigDetailList getCrossChainAuctionConfigDetailList() {
+    GrpcAPI.CrossChainAuctionConfigDetailList.Builder builder = GrpcAPI
+        .CrossChainAuctionConfigDetailList
+        .newBuilder();
     DynamicPropertiesStore dynamicPropertiesStore = chainBaseManager.getDynamicPropertiesStore();
     List<Long> auctionConfigDetailList = dynamicPropertiesStore.listAuctionConfigs();
     if (CollectionUtils.isEmpty(auctionConfigDetailList)) {
       return null;
     }
     auctionConfigDetailList.forEach(value -> {
-      CrossChain.AuctionRoundContract auctionRoundContract = CrossChain.AuctionRoundContract.newBuilder()
+      CrossChain.AuctionRoundContract auctionRoundContract = CrossChain
+          .AuctionRoundContract.newBuilder()
                 .setDuration(AuctionConfigParser.getAuctionDuration(value))
                 .setEndTime(AuctionConfigParser.getAuctionEndTime(value))
                 .setRound(AuctionConfigParser.getAuctionRound(value))
                 .setSlotCount(AuctionConfigParser.getSlotCount(value))
                 .build();
-      builder.addAuctionConfigDetail(auctionRoundContract);
+      if (auctionRoundContract.getRound() > 0) {
+        builder.addAuctionConfigDetail(auctionRoundContract);
+      }
+    });
+    return builder.build();
+  }
+
+  public GrpcAPI.ParaChainList getParaChainList(int round) {
+    GrpcAPI.ParaChainList.Builder builder = GrpcAPI.ParaChainList.newBuilder();
+    CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
+    List<String> paraChainList = crossRevokingStore.getParaChainList(round);
+    if (CollectionUtils.isEmpty(paraChainList)) {
+      return null;
+    }
+    paraChainList.forEach(value -> {
+      builder.addParaChainIds(ByteString.copyFrom(ByteArray.fromHexString(value)));
     });
     return builder.build();
   }

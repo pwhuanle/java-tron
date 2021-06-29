@@ -80,9 +80,9 @@ public class PbftMessageHandle {
     start();
   }
 
-  public List<Miner> getSrMinerList() {
+  public List<Miner> getSrMinerList(List<ByteString> signSrList) {
     return Param.getInstance().getMiners().stream()
-        .filter(miner -> chainBaseManager.getWitnesses().contains(miner.getWitnessAddress()))
+        .filter(miner -> signSrList.contains(miner.getWitnessAddress()))
         .collect(Collectors.toList());
   }
 
@@ -107,7 +107,8 @@ public class PbftMessageHandle {
     if (!checkIsCanSendMsg(message)) {
       return;
     }
-    for (Miner miner : getSrMinerList()) {
+    List<ByteString> signSrList = witnesssList(message);
+    for (Miner miner : getSrMinerList(signSrList)) {
       PbftMessage paMessage = message.buildPrePareMessage(miner);
       forwardMessage(paMessage);
       try {
@@ -130,6 +131,11 @@ public class PbftMessageHandle {
       pareMsgCache.put(key, message);
       return;
     }
+    if (!verifyMsgSign(message)) {
+      logger.error("[prepare]verify {}, {} pbft msg sign fail!", message.getKey(),
+          message.getDataType());
+      return;
+    }
     if (pareVoteMap.containsKey(key)) {
       //Explain that the vote has been voted and cannot be repeated
       if (!pareVoteMap.get(key).getPbftMessage().getRawData().getData()
@@ -148,10 +154,11 @@ public class PbftMessageHandle {
     //The number of votes plus 1
     if (!doneMsg.containsKey(message.getNo())) {
       long agCou = agreePare.incrementAndGet(message.getDataKey());
-      if (agCou >= Param.getInstance().getAgreeNodeCount()) {
+      if (checkPbftConsensusNum(agCou)) {
         agreePare.remove(message.getDataKey());
         //Entering the submission stage
-        for (Miner miner : getSrMinerList()) {
+        List<ByteString> signSrList = witnesssList(message);
+        for (Miner miner : getSrMinerList(signSrList)) {
           PbftMessage cmMessage = message.buildCommitMessage(miner);
           doneMsg.put(message.getNo(), cmMessage);
           forwardMessage(cmMessage);
@@ -174,6 +181,11 @@ public class PbftMessageHandle {
       commitMsgCache.put(key, message);
       return;
     }
+    if (!verifyMsgSign(message)) {
+      logger.error("[commit]verify {}, {} pbft msg sign fail!", message.getKey(),
+          message.getDataType());
+      return;
+    }
     if (commitVoteMap.containsKey(key)) {
       //Explain that the node has voted on the data and cannot vote repeatedly.
       if (!commitVoteMap.get(key).getPbftMessage().getRawData().getData()
@@ -188,7 +200,7 @@ public class PbftMessageHandle {
     long agCou = agreeCommit.incrementAndGet(message.getDataKey());
     dataSignCache.getUnchecked(message.getDataKey())
         .add(message.getPbftMessage().getSignature());
-    if (agCou >= Param.getInstance().getAgreeNodeCount()) {
+    if (checkPbftConsensusNum(agCou)) {
       srPbftMessage = null;
       remove(message.getNo());
       //commit,
@@ -204,6 +216,21 @@ public class PbftMessageHandle {
 
   public void onChangeView(PbftBaseMessage message) {
 
+  }
+
+  public List<ByteString> witnesssList(PbftBaseMessage msg) {
+    long epoch = msg.getPbftMessage().getRawData().getEpoch();
+    List<ByteString> witnessList;
+    if (msg.getDataType() == DataType.SRL) {
+      witnessList = maintenanceManager.getBeforeWitness();
+    } else {
+      if (epoch > maintenanceManager.getBeforeMaintenanceTime()) {
+        witnessList = maintenanceManager.getCurrentWitness();
+      } else {
+        witnessList = maintenanceManager.getBeforeWitness();
+      }
+    }
+    return witnessList;
   }
 
   public void forwardMessage(PbftBaseMessage message) {
@@ -228,18 +255,16 @@ public class PbftMessageHandle {
     }
   }
 
+  public boolean verifyMsgSign(PbftBaseMessage msg) {
+    return witnesssList(msg).contains(ByteString.copyFrom(msg.getPublicKey()));
+  }
+
   public boolean checkIsCanSendMsg(PbftMessage msg) {
     if (!Param.getInstance().isEnable()) {//is witness
       return false;
     }
     ByteString publicKey = Param.getInstance().getMiner().getPrivateKeyAddress();
-    List<ByteString> compareList;
-    long epoch = msg.getPbftMessage().getRawData().getEpoch();
-    if (epoch > maintenanceManager.getBeforeMaintenanceTime()) {
-      compareList = maintenanceManager.getCurrentWitness();
-    } else {
-      compareList = maintenanceManager.getBeforeWitness();
-    }
+    List<ByteString> compareList = witnesssList(msg);
     if (!compareList.contains(publicKey)) {
       return false;
     }
@@ -307,5 +332,10 @@ public class PbftMessageHandle {
   @PreDestroy
   public void stop() {
     timer.cancel();
+  }
+
+  private boolean checkPbftConsensusNum(long agCount) {
+    //return agCount >= Param.getInstance().getAgreeNodeCount() && agCount > 1;
+    return agCount >= Param.getInstance().getAgreeNodeCount();
   }
 }

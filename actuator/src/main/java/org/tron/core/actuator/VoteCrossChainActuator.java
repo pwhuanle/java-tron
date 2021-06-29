@@ -14,6 +14,7 @@ import org.tron.core.exception.BalanceInsufficientException;
 import org.tron.core.exception.ContractExeException;
 import org.tron.core.exception.ContractValidateException;
 import org.tron.core.store.AccountStore;
+import org.tron.core.store.DynamicPropertiesStore;
 import org.tron.protos.Protocol.Transaction.Contract.ContractType;
 import org.tron.protos.Protocol.Transaction.Result.code;
 import org.tron.protos.contract.CrossChain.VoteCrossChainContract;
@@ -38,12 +39,13 @@ public class VoteCrossChainActuator extends AbstractActuator {
       VoteCrossChainContract voteCrossContract = any.unpack(VoteCrossChainContract.class);
       AccountStore accountStore = chainBaseManager.getAccountStore();
       CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
-      String chainId = voteCrossContract.getChainId().toString();
+      long registerNum = voteCrossContract.getRegisterNum();
       long amount = voteCrossContract.getAmount();
       byte[] address = voteCrossContract.getOwnerAddress().toByteArray();
       int round = voteCrossContract.getRound();
 
-      byte[] voteCrossInfoBytes = crossRevokingStore.getChainVote(round, chainId, ByteArray.toHexString(address));
+      byte[] voteCrossInfoBytes =
+              crossRevokingStore.getChainVote(round, registerNum, ByteArray.toHexString(address));
       if (!ByteArray.isEmpty(voteCrossInfoBytes)) {
         VoteCrossChainContract voteCrossInfo = VoteCrossChainContract.parseFrom(voteCrossInfoBytes);
         VoteCrossChainContract.Builder builder = voteCrossContract.toBuilder();
@@ -52,8 +54,9 @@ public class VoteCrossChainActuator extends AbstractActuator {
       }
 
       Commons.adjustBalance(accountStore, address, -amount);
-      crossRevokingStore.putChainVote(round, chainId, ByteArray.toHexString(address), voteCrossContract.toByteArray());
-      crossRevokingStore.updateTotalChainVote(round, chainId, amount);
+      crossRevokingStore.putChainVote(round, registerNum,
+              ByteArray.toHexString(address), voteCrossContract.toByteArray());
+      crossRevokingStore.updateTotalChainVote(round, registerNum, amount);
 
       Commons.adjustBalance(accountStore, address, -fee);
       Commons.adjustBalance(accountStore, accountStore.getBlackhole().createDbKey(), fee);
@@ -74,8 +77,13 @@ public class VoteCrossChainActuator extends AbstractActuator {
     if (chainBaseManager == null) {
       throw new ContractValidateException(ActuatorConstant.STORE_NOT_EXIST);
     }
+
+    DynamicPropertiesStore dynamicStore = chainBaseManager.getDynamicPropertiesStore();
+    if (!dynamicStore.allowCrossChain()) {
+      throw new ContractValidateException("not support cross chain!");
+    }
+
     AccountStore accountStore = chainBaseManager.getAccountStore();
-    CrossRevokingStore crossRevokingStore = chainBaseManager.getCrossRevokingStore();
     if (!this.any.is(VoteCrossChainContract.class)) {
       throw new ContractValidateException(
           "contract type error, expected type [VoteCrossContract], real type[" + any
@@ -89,12 +97,15 @@ public class VoteCrossChainActuator extends AbstractActuator {
       throw new ContractValidateException(e.getMessage());
     }
 
-    String chainId = contract.getChainId().toString();
+    long registerNum = contract.getRegisterNum();
     long amount = contract.getAmount();
     byte[] ownerAddress = contract.getOwnerAddress().toByteArray();
     int round = contract.getRound();
     if (!DecodeUtil.addressValid(ownerAddress)) {
       throw new ContractValidateException("Invalid address");
+    }
+    if (amount <= 0L) {
+      throw new ContractValidateException("the amount of votes must be greater than 0");
     }
     AccountCapsule accountCapsule = accountStore.get(ownerAddress);
     if (accountCapsule.getBalance() - amount < 0) {
@@ -102,21 +113,12 @@ public class VoteCrossChainActuator extends AbstractActuator {
               "Validate VoteCrossContract error, balance is not sufficient.");
     }
 
-    String readableOwnerAddress = ByteArray.toHexString(ownerAddress);
-    byte[] voteCrossInfoBytes = crossRevokingStore.getChainVote(round, chainId, readableOwnerAddress);
-    if (!ByteArray.isEmpty(voteCrossInfoBytes)) {
-      try {
-        VoteCrossChainContract voteCrossInfo = VoteCrossChainContract.parseFrom(voteCrossInfoBytes);
-        long voteCountBefore = voteCrossInfo.getAmount();
+    if (registerNum <= 0) {
+      throw new ContractValidateException("Invalid registerNum");
+    }
 
-        if (voteCountBefore + amount < 0) {
-          throw new ContractValidateException(
-                  "the amount for revoke is larger than the vote count.");
-        }
-      } catch (InvalidProtocolBufferException e) {
-        logger.debug(e.getMessage(), e);
-        throw new ContractValidateException(e.getMessage());
-      }
+    if (round <= 0) {
+      throw new ContractValidateException("Invalid round");
     }
 
     return true;

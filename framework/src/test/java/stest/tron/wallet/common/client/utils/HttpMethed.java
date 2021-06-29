@@ -367,6 +367,40 @@ public class HttpMethed {
   /**
    * constructor.
    */
+  public static HttpResponse createProposals(String httpNode, byte[] ownerAddress,
+                                             Map<Long, Long> proposals, String fromKey) {
+    try {
+      final String requestUrl = "http://" + httpNode + "/wallet/proposalcreate";
+      JsonObject userBaseObj2 = new JsonObject();
+      JsonArray array = new JsonArray();
+
+      for (Long key : proposals.keySet()) {
+        JsonObject proposalMap = new JsonObject();
+        proposalMap.addProperty("key", key);
+        proposalMap.addProperty("value", proposals.get(key));
+        System.out.println(key + " : " + proposals.get(key));
+        array.add(proposalMap);
+      }
+      userBaseObj2.addProperty("owner_address", ByteArray.toHexString(ownerAddress));
+      userBaseObj2.add("parameters", array);
+
+      response = createConnect(requestUrl, userBaseObj2);
+      transactionString = EntityUtils.toString(response.getEntity());
+      transactionSignString = gettransactionsign(httpNode, transactionString, fromKey);
+      logger.info(transactionString);
+      logger.info(transactionSignString);
+      response = broadcastTransaction(httpNode, transactionSignString);
+    } catch (Exception e) {
+      e.printStackTrace();
+      httppost.releaseConnection();
+      return null;
+    }
+    return response;
+  }
+
+  /**
+   * constructor.
+   */
   public static HttpResponse approvalProposal(String httpNode, byte[] ownerAddress,
       Integer proposalId, Boolean isAddApproval, String fromKey) {
     try {
@@ -1005,6 +1039,9 @@ public class HttpMethed {
       if (resourceCode == 1) {
         userBaseObj2.addProperty("resource", "ENERGY");
       }
+      if (resourceCode == 2) {
+        userBaseObj2.addProperty("resource", "TRON_POWER");
+      }
       if (receiverAddress != null) {
         userBaseObj2.addProperty("receiver_address", ByteArray.toHexString(receiverAddress));
       }
@@ -1042,6 +1079,9 @@ public class HttpMethed {
       }
       if (resourceCode == 1) {
         userBaseObj2.addProperty("resource", "ENERGY");
+      }
+      if (resourceCode == 2) {
+        userBaseObj2.addProperty("resource", "TRON_POWER");
       }
       if (receiverAddress != null) {
         userBaseObj2.addProperty("receiver_address", ByteArray.toHexString(receiverAddress));
@@ -2069,6 +2109,7 @@ public class HttpMethed {
       accountBalanceObj.add("account_identifier", addressObj);
       accountBalanceObj.add("block_identifier", blockObj);
       accountBalanceObj.addProperty("visible", true);
+      logger.info(accountBalanceObj.toString());
       response = createConnect(requestUrl, accountBalanceObj);
     } catch (Exception e) {
       e.printStackTrace();
@@ -5168,5 +5209,60 @@ public class HttpMethed {
     }
     return response;
   }
+
+  /**
+   * constructor.
+   */
+  public static int getTransactionPendingSize(String httpNode) {
+    try {
+      String requestUrl = "http://" + httpNode + "/wallet/getpendingsize";
+      JsonObject userBaseObj2 = new JsonObject();
+      response = createConnect(requestUrl, userBaseObj2);
+    } catch (Exception e) {
+      e.printStackTrace();
+      httppost.releaseConnection();
+      return 0;
+    }
+    responseContent = HttpMethed.parseResponseContent(response);
+    return responseContent.getInteger("pendingSize");
+  }
+
+  /**
+   * constructor.
+   */
+  public static HttpResponse getTransactionListFromPending(String httpNode) {
+    try {
+      String requestUrl = "http://" + httpNode + "/wallet/gettransactionlistfrompending";
+      JsonObject userBaseObj2 = new JsonObject();
+      response = createConnect(requestUrl, userBaseObj2);
+    } catch (Exception e) {
+      e.printStackTrace();
+      httppost.releaseConnection();
+      return null;
+    }
+    return response;
+  }
+
+
+  /**
+   * constructor.
+   */
+  public static HttpResponse getTransactionFromPending(String httpNode, String txid) {
+    try {
+      String requestUrl = "http://" + httpNode + "/wallet/gettransactionfrompending";
+      JsonObject userBaseObj2 = new JsonObject();
+      userBaseObj2.addProperty("value", txid);
+      response = createConnect(requestUrl, userBaseObj2);
+    } catch (Exception e) {
+      e.printStackTrace();
+      httppost.releaseConnection();
+      return null;
+    }
+    return response;
+  }
+
+
+
+
 
 }
