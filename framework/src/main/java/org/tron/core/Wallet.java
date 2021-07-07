@@ -975,17 +975,10 @@ public class Wallet {
         .setKey("getAllowPBFT")
         .setValue(dbManager.getDynamicPropertiesStore().getAllowPBFT())
         .build());
-
-    //builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
-    //    .setKey("getAllowTvmStake")
-    //    .setValue(dbManager.getDynamicPropertiesStore().getAllowTvmStake())
-    //    .build());
-
     //builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
     //        .setKey("getAllowTvmAssetIssue")
     //        .setValue(dbManager.getDynamicPropertiesStore().getAllowTvmAssetIssue())
     //        .build());
-
     builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
         .setKey("getAllowTransactionFeePool")
         .setValue(dbManager.getDynamicPropertiesStore().getAllowTransactionFeePool())
@@ -1008,6 +1001,16 @@ public class Wallet {
     builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
         .setKey("getAllowTvmFreeze")
         .setValue(dbManager.getDynamicPropertiesStore().getAllowTvmFreeze())
+        .build());
+
+    builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
+        .setKey("getAllowNewRewardAlgorithm")
+        .setValue(chainBaseManager.getDynamicPropertiesStore().getAllowNewRewardAlgorithm())
+        .build());
+
+    builder.addChainParameter(Protocol.ChainParameters.ChainParameter.newBuilder()
+        .setKey("getAllowTvmVote")
+        .setValue(dbManager.getDynamicPropertiesStore().getAllowTvmVote())
         .build());
 
     return builder.build();

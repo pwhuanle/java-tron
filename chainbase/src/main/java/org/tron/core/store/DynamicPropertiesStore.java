@@ -127,8 +127,6 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
       "ALLOW_SHIELDED_TRC20_TRANSACTION"
           .getBytes();
   private static final byte[] ALLOW_TVM_ISTANBUL = "ALLOW_TVM_ISTANBUL".getBytes();
-  private static final byte[] ALLOW_TVM_STAKE = "ALLOW_TVM_STAKE".getBytes();
-  private static final byte[] ALLOW_TVM_ASSET_ISSUE = "ALLOW_TVM_ASSET_ISSUE".getBytes();
   private static final byte[] ALLOW_TVM_CONSTANTINOPLE = "ALLOW_TVM_CONSTANTINOPLE".getBytes();
   private static final byte[] ALLOW_TVM_SOLIDITY_059 = "ALLOW_TVM_SOLIDITY_059".getBytes();
   private static final byte[] FORBID_TRANSFER_TO_CONTRACT = "FORBID_TRANSFER_TO_CONTRACT"
@@ -157,6 +155,10 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
   private static final byte[] ALLOW_BLACKHOLE_OPTIMIZATION = "ALLOW_BLACKHOLE_OPTIMIZATION".getBytes();
   private static final byte[] ALLOW_NEW_RESOURCE_MODEL = "ALLOW_NEW_RESOURCE_MODEL".getBytes();
   private static final byte[] ALLOW_TVM_FREEZE = "ALLOW_TVM_FREEZE".getBytes();
+  private static final byte[] ALLOW_TVM_VOTE = "ALLOW_TVM_VOTE".getBytes();
+
+  private static final byte[] ALLOW_NEW_REWARD_ALGORITHM = "ALLOW_NEW_REWARD_ALGORITHM".getBytes();
+  private static final byte[] NEW_REWARD_ALGORITHM_EFFECTIVE_CYCLE = "NEW_REWARD_ALGORITHM_EFFECTIVE_CYCLE".getBytes();
 
   @Autowired
   private DynamicPropertiesStore(@Value("properties") String dbName) {
@@ -636,20 +638,6 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     }
 
     try {
-      this.getAllowTvmStake();
-    } catch (IllegalArgumentException e) {
-      this.saveAllowTvmStake(
-          CommonParameter.getInstance().getAllowTvmStake());
-    }
-
-    try {
-      this.getAllowTvmAssetIssue();
-    } catch (IllegalArgumentException e) {
-      this.saveAllowTvmAssetIssue(
-          CommonParameter.getInstance().getAllowTvmAssetIssue());
-    }
-
-    try {
       this.getBlockFilledSlots();
     } catch (IllegalArgumentException e) {
       int[] blockFilledSlots = new int[getBlockFilledSlotsNumber()];
@@ -755,8 +743,20 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
     try {
       this.getAllowTvmFreeze();
     } catch (IllegalArgumentException e) {
-      this.saveAllowTvmFreeze(
-          CommonParameter.getInstance().getAllowTvmFreeze());
+      this.saveAllowTvmFreeze(CommonParameter.getInstance().getAllowTvmFreeze());
+    }
+
+    try {
+      this.getAllowNewRewardAlgorithm();
+    } catch (IllegalArgumentException e) {
+      this.saveAllowNewRewardAlgorithm(
+          CommonParameter.getInstance().getAllowNewRewardAlgorithm());
+    }
+
+    try {
+      this.getAllowTvmVote();
+    } catch (IllegalArgumentException e) {
+      this.saveAllowTvmVote(CommonParameter.getInstance().getAllowTvmVote());
     }
 
   }
@@ -1840,34 +1840,6 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
             () -> new IllegalArgumentException(msg));
   }
 
-  public void saveAllowTvmStake(long allowTvmStake) {
-    this.put(DynamicPropertiesStore.ALLOW_TVM_STAKE,
-        new BytesCapsule(ByteArray.fromLong(allowTvmStake)));
-  }
-
-  public void saveAllowTvmAssetIssue(long allowTvmAssetIssue) {
-    this.put(DynamicPropertiesStore.ALLOW_TVM_ASSET_ISSUE,
-        new BytesCapsule(ByteArray.fromLong(allowTvmAssetIssue)));
-  }
-
-  public long getAllowTvmStake() {
-    String msg = "not found ALLOW_TVM_STAKE";
-    return Optional.ofNullable(getUnchecked(ALLOW_TVM_STAKE))
-        .map(BytesCapsule::getData)
-        .map(ByteArray::toLong)
-        .orElseThrow(
-            () -> new IllegalArgumentException(msg));
-  }
-
-  public long getAllowTvmAssetIssue() {
-    String msg = "not found ALLOW_TVM_ASSETISSUE";
-    return Optional.ofNullable(getUnchecked(ALLOW_TVM_ASSET_ISSUE))
-        .map(BytesCapsule::getData)
-        .map(ByteArray::toLong)
-        .orElseThrow(
-            () -> new IllegalArgumentException(msg));
-  }
-
   public boolean supportShieldedTransaction() {
     return getAllowShieldedTransaction() == 1L;
   }
@@ -2258,6 +2230,52 @@ public class DynamicPropertiesStore extends TronStoreWithRevoking<BytesCapsule> 
         .map(ByteArray::toLong)
         .orElseThrow(
             () -> new IllegalArgumentException(msg));
+  }
+
+  public void saveAllowTvmVote(long allowTvmVote) {
+    this.put(DynamicPropertiesStore.ALLOW_TVM_VOTE,
+        new BytesCapsule(ByteArray.fromLong(allowTvmVote)));
+  }
+
+  public long getAllowTvmVote() {
+    String msg = "not found ALLOW_TVM_VOTE";
+    return Optional.ofNullable(getUnchecked(ALLOW_TVM_VOTE))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElseThrow(
+            () -> new IllegalArgumentException(msg));
+  }
+
+  public void saveAllowNewRewardAlgorithm(long value) {
+    this.put(ALLOW_NEW_REWARD_ALGORITHM,
+        new BytesCapsule(ByteArray.fromLong(value)));
+  }
+
+  public long getAllowNewRewardAlgorithm() {
+    return Optional.ofNullable(getUnchecked(ALLOW_NEW_REWARD_ALGORITHM))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElseThrow(
+            () -> new IllegalArgumentException("not found ALLOW_NEW_REWARD_ALGORITHM"));
+  }
+
+  public boolean useNewRewardAlgorithm() {
+    return getAllowNewRewardAlgorithm() == 1;
+  }
+
+  public void saveNewRewardAlgorithmEffectiveCycle() {
+    if (getNewRewardAlgorithmEffectiveCycle() == Long.MAX_VALUE) {
+      long currentCycle = getCurrentCycleNumber();
+      this.put(NEW_REWARD_ALGORITHM_EFFECTIVE_CYCLE,
+          new BytesCapsule(ByteArray.fromLong(currentCycle + 1)));
+    }
+  }
+
+  public long getNewRewardAlgorithmEffectiveCycle() {
+    return Optional.ofNullable(getUnchecked(NEW_REWARD_ALGORITHM_EFFECTIVE_CYCLE))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElse(Long.MAX_VALUE);
   }
 
   private static class DynamicResourceProperties {

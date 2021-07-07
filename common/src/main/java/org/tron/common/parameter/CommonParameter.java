@@ -446,15 +446,15 @@ public class CommonParameter {
 
   @Getter
   @Setter
-  public long allowTvmStake;
-
-  @Getter
-  @Setter
-  public long allowTvmAssetIssue;
-
-  @Getter
-  @Setter
   public long allowTvmFreeze;
+
+  @Getter
+  @Setter
+  public long allowNewRewardAlgorithm;
+
+  @Getter
+  @Setter
+  public long allowTvmVote;
 
   @Getter
   @Setter

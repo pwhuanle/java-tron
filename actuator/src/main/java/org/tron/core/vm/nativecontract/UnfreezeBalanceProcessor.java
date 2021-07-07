@@ -1,26 +1,30 @@
 package org.tron.core.vm.nativecontract;
 
+import static org.tron.core.actuator.ActuatorConstant.STORE_NOT_EXIST;
 import static org.tron.core.config.Parameter.ChainConstant.TRX_PRECISION;
 
 import com.google.common.collect.Lists;
+import com.google.protobuf.ByteString;
 import java.util.Iterator;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
 import org.tron.common.utils.FastByteComparisons;
-import org.tron.core.actuator.ActuatorConstant;
 import org.tron.core.capsule.AccountCapsule;
 import org.tron.core.capsule.DelegatedResourceCapsule;
+import org.tron.core.capsule.VotesCapsule;
 import org.tron.core.exception.ContractExeException;
 import org.tron.core.exception.ContractValidateException;
 import org.tron.core.vm.nativecontract.param.UnfreezeBalanceParam;
 import org.tron.core.vm.repository.Repository;
 import org.tron.protos.Protocol;
 
+@Slf4j(topic = "Processor")
 public class UnfreezeBalanceProcessor {
 
   public void validate(UnfreezeBalanceParam param, Repository repo)
       throws ContractValidateException {
     if (repo == null) {
-      throw new ContractValidateException(ActuatorConstant.STORE_NOT_EXIST);
+      throw new ContractValidateException(STORE_NOT_EXIST);
     }
 
     byte[] ownerAddress = param.getOwnerAddress();
@@ -194,6 +198,18 @@ public class UnfreezeBalanceProcessor {
     }
 
     // notice: clear vote code is removed
-    repo.updateAccount(ownerAddress, accountCapsule);
+    // notice: clear vote code is added
+    if (!accountCapsule.getVotesList().isEmpty()) {
+      VotesCapsule votesCapsule = repo.getVotes(ownerAddress);
+      if (votesCapsule == null) {
+        votesCapsule = new VotesCapsule(ByteString.copyFrom(ownerAddress),
+            accountCapsule.getVotesList());
+      }
+      accountCapsule.clearVotes();
+      votesCapsule.clearNewVotes();
+      repo.updateVotes(ownerAddress, votesCapsule);
+    }
+
+    repo.updateAccount(accountCapsule.createDbKey(), accountCapsule);
   }
 }
